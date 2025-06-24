@@ -14,7 +14,7 @@ export times=0; python eval_only_slot.py \
 
 
 ## SLOT with iters=5
-export times=5; export lr=0.1; python eval_only_slot.py \
+export times=3; export lr=0.1; python eval_only_slot.py \
     --model_path $model_path 
 
 

@@ -84,11 +84,13 @@ The reasoning process and answer are enclosed within <think> </think> and<answer
         ], tokenize=False, add_generation_prompt=True)
         
         inputs = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to(model.device)
+        # target_ids = tokenizer(qa['A'], return_tensors="pt", add_special_tokens=False).to(model.device)
         
         os.environ["prompt_only"] = "True" # Ensure this env var is handled correctly if needed elsewhere
         outputs = model.generate(
             **inputs,
             **generation_params,
+            # target_ids=target_ids,
         )
         
         completion = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)

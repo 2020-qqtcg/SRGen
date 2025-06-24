@@ -806,6 +806,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
+        target_ids: Optional[torch.LongTensor] = None,  # 新增：额外的目标文本
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -883,7 +884,13 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     logits = self.lm_head(transformed_hidden)
                     loss_fct = nn.CrossEntropyLoss()
                     shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = input_ids[:, 1:].contiguous()
+                    
+                    if target_ids is not None:
+                        # Use text grad as labels
+                        shift_labels = target_ids[:, 1:].contiguous()
+                    else:
+                        # Use prompt as labels
+                        shift_labels = input_ids[:, 1:].contiguous()
                     loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
                     loss.backward()
                     optimizer.step()
