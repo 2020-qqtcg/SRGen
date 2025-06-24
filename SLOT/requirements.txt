@@ -25,7 +25,7 @@ colorful==0.5.6
 colorlog==6.9.0
 compressed-tensors==0.9.1
 dataproperty==1.1.0
-datasets==2.19.0
+datasets>=3.0.0
 deepspeed==0.15.4
 depyf==0.18.0
 dill==0.3.8
