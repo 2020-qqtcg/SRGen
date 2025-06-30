@@ -806,7 +806,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
-        target_ids: Optional[torch.LongTensor] = None,  # 新增：额外的目标文本
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -885,21 +884,70 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     loss_fct = nn.CrossEntropyLoss()
                     shift_logits = logits[..., :-1, :].contiguous()
                     
-                    if target_ids is not None:
-                        # Use text grad as labels
-                        shift_labels = target_ids[:, 1:].contiguous()
-                    else:
-                        # Use prompt as labels
-                        shift_labels = input_ids[:, 1:].contiguous()
+                    shift_labels = input_ids[:, 1:].contiguous()
                     loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
                     loss.backward()
                     optimizer.step()
                 self.delta = delta
-                hidden_states = hidden_states + self.delta
+                
+                # 计算熵并选择熵最大的20%的token来应用delta
+                with torch.no_grad():
+                    # 计算当前的logits用于熵计算
+                    current_logits = self.lm_head(hidden_states)
+                    # 计算概率分布
+                    probs = torch.softmax(current_logits, dim=-1)
+                    # 计算每个位置的熵
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)  # [batch_size, seq_len]
+                    
+                    # 找出熵最大的20%的位置
+                    batch_size, seq_len = entropy.shape
+                    top_k = max(1, int(seq_len * 0.2))  # 20%的token数量
+                    
+                    # 为每个batch找出熵最大的位置
+                    _, top_indices = torch.topk(entropy, top_k, dim=-1)  # [batch_size, top_k]
+                    
+                    # 创建mask
+                    entropy_mask = torch.zeros_like(entropy, dtype=torch.bool)
+                    for batch_idx in range(batch_size):
+                        entropy_mask[batch_idx, top_indices[batch_idx]] = True
+                    
+                    # 扩展mask到hidden_states的维度
+                    entropy_mask = entropy_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+                    
+                # 只对熵最大的20%位置应用delta
+                delta_to_apply = torch.where(entropy_mask, self.delta, torch.zeros_like(self.delta))
+                hidden_states = hidden_states + delta_to_apply
+                
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
         else:
-            hidden_states = hidden_states + self.delta
+            # 计算熵并选择熵最大的20%的token来应用delta
+            with torch.no_grad():
+                # 计算当前的logits用于熵计算
+                current_logits = self.lm_head(hidden_states)
+                # 计算概率分布
+                probs = torch.softmax(current_logits, dim=-1)
+                # 计算每个位置的熵
+                entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)  # [batch_size, seq_len]
+                
+                # 找出熵最大的20%的位置
+                batch_size, seq_len = entropy.shape
+                top_k = max(1, int(seq_len * 0.2))  # 20%的token数量
+                
+                # 为每个batch找出熵最大的位置
+                _, top_indices = torch.topk(entropy, top_k, dim=-1)  # [batch_size, top_k]
+                
+                # 创建mask
+                entropy_mask = torch.zeros_like(entropy, dtype=torch.bool)
+                for batch_idx in range(batch_size):
+                    entropy_mask[batch_idx, top_indices[batch_idx]] = True
+                
+                # 扩展mask到hidden_states的维度
+                entropy_mask = entropy_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+                
+            # 只对熵最大的20%位置应用delta
+            delta_to_apply = torch.where(entropy_mask, self.delta, torch.zeros_like(self.delta))
+            hidden_states = hidden_states + delta_to_apply
         ###### SLOT end here
             
 

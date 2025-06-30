@@ -90,7 +90,6 @@ The reasoning process and answer are enclosed within <think> </think> and<answer
         outputs = model.generate(
             **inputs,
             **generation_params,
-            # target_ids=target_ids,
         )
         
         completion = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
