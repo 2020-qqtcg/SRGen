@@ -979,7 +979,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                         input_token = input_ids[batch_idx, actual_seq_idx].item()
                         
                         record = {
-                            "timestamp": datetime.now().isoformat(),
                             "batch_idx": batch_idx,
                             "seq_idx": actual_seq_idx,
                             "input_token": input_token,
