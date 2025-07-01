@@ -899,12 +899,18 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     loss.backward()
                     optimizer.step()
                 self.delta = delta
-                hidden_states = hidden_states + self.delta
+                
+                # Apply delta with entropy threshold check
+                entropy_threshold = float(os.environ.get("entropy_threshold", "0.0"))
+                hidden_states = self._apply_delta_with_entropy_check(hidden_states, entropy_threshold)
+                
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
         else:
             if self.delta is not None:
-                hidden_states = hidden_states + self.delta
+                # Apply delta with entropy threshold check
+                entropy_threshold = float(os.environ.get("entropy_threshold", "0.0"))
+                hidden_states = self._apply_delta_with_entropy_check(hidden_states, entropy_threshold)
         ###### SLOT end here
 
         # Calculate entropy and record analysis if enabled
@@ -1016,6 +1022,47 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             return decoded
         except Exception as e:
             return f"<decode_error_{token_id}>"
+
+    def _apply_delta_with_entropy_check(self, hidden_states, entropy_threshold):
+        """Apply delta only to tokens with entropy above threshold"""
+        if self.delta is None:
+            return hidden_states
+            
+        with torch.no_grad():
+            # Calculate logits for current hidden states
+            logits = self.lm_head(hidden_states)
+            
+            # Calculate probabilities and entropy for each token
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1)  # Shape: [batch_size, seq_len]
+            
+            batch_size, seq_len = entropy.shape
+            
+            # Debug logging if enabled
+            if os.environ.get("debug_entropy", "False") == "True":
+                print(f"Entropy threshold: {entropy_threshold}")
+                print(f"Entropy range: {entropy.min().item():.3f} - {entropy.max().item():.3f}")
+                print(f"Sequence length: {seq_len}")
+            
+            # If seq_len == 1 (common in generation), simple check
+            if seq_len == 1:
+                if entropy.item() >= entropy_threshold:
+                    return hidden_states + self.delta
+                else:
+                    return hidden_states
+            
+            # For longer sequences, use masking
+            else:
+                # Create mask for tokens with entropy >= threshold
+                entropy_mask = (entropy >= entropy_threshold).unsqueeze(-1)  # Shape: [batch_size, seq_len, 1]
+                
+                # Apply delta only where entropy is above threshold
+                delta_to_apply = self.delta * entropy_mask.float()
+                
+                if os.environ.get("debug_entropy", "False") == "True":
+                    print(f"Tokens above threshold: {entropy_mask.sum().item()}/{entropy.numel()}")
+                
+                return hidden_states + delta_to_apply
 
 
 @add_start_docstrings(
