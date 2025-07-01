@@ -1029,11 +1029,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             return hidden_states
             
         with torch.no_grad():
+            # Store original dtype
+            original_dtype = hidden_states.dtype
+            
             # Calculate logits for current hidden states
             logits = self.lm_head(hidden_states)
             
             # Calculate probabilities and entropy for each token
-            probs = F.softmax(logits, dim=-1)
+            # Convert to float32 for numerical stability
+            probs = F.softmax(logits.float(), dim=-1)
             entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1)  # Shape: [batch_size, seq_len]
             
             batch_size, seq_len = entropy.shape
@@ -1043,11 +1047,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 print(f"Entropy threshold: {entropy_threshold}")
                 print(f"Entropy range: {entropy.min().item():.3f} - {entropy.max().item():.3f}")
                 print(f"Sequence length: {seq_len}")
+                print(f"Hidden states dtype: {original_dtype}")
+                print(f"Delta dtype: {self.delta.dtype}")
             
             # If seq_len == 1 (common in generation), simple check
             if seq_len == 1:
                 if entropy.item() >= entropy_threshold:
-                    return hidden_states + self.delta
+                    # Ensure delta has the same dtype as hidden_states
+                    delta_to_add = self.delta.to(dtype=original_dtype, device=hidden_states.device)
+                    return hidden_states + delta_to_add
                 else:
                     return hidden_states
             
@@ -1056,8 +1064,11 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 # Create mask for tokens with entropy >= threshold
                 entropy_mask = (entropy >= entropy_threshold).unsqueeze(-1)  # Shape: [batch_size, seq_len, 1]
                 
+                # Ensure delta has the same dtype as hidden_states
+                delta_to_add = self.delta.to(dtype=original_dtype, device=hidden_states.device)
+                
                 # Apply delta only where entropy is above threshold
-                delta_to_apply = self.delta * entropy_mask.float()
+                delta_to_apply = delta_to_add * entropy_mask.to(dtype=original_dtype)
                 
                 if os.environ.get("debug_entropy", "False") == "True":
                     print(f"Tokens above threshold: {entropy_mask.sum().item()}/{entropy.numel()}")
