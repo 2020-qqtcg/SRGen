@@ -34,7 +34,7 @@ from transformers.utils import (
 )
 from transformers.utils.deprecation import deprecate_kwarg
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
-
+from transformers import AutoTokenizer
 
 logger = logging.get_logger(__name__)
 
@@ -1007,11 +1007,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         """Safely decode a token ID to text, handling potential errors"""
         try:
             # Try to get tokenizer from the model
-            if hasattr(self, 'tokenizer') and self.tokenizer is not None:
-                return self.tokenizer.decode([token_id], skip_special_tokens=False)
-            else:
-                # Return token ID as string if no tokenizer available
-                return f"<token_{token_id}>"
+            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
         except Exception as e:
             return f"<decode_error_{token_id}>"
 

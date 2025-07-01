@@ -36,6 +36,7 @@ export times=5
 export lr=0.1
 export record_entropy=True
 export entropy_output_file="my_analysis.jsonl"
+export tokenizer_path=$model_path
 
 # 运行评估
 python eval_only_slot.py \
