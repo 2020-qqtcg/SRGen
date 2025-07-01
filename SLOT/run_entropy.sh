@@ -34,9 +34,10 @@ echo "Running SLOT with iters=3..." | tee -a "$ERROR_LOG"
 # 设置环境变量
 export times=5
 export lr=0.1
-export record_entropy=True
+export record_entropy=False
 export entropy_output_file="my_analysis.jsonl"
 export tokenizer_path=$model_path
+export entropy_threshold=0.672
 
 # 运行评估
 python eval_only_slot.py \
