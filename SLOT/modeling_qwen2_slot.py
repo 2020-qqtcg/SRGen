@@ -1007,6 +1007,13 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         try:
             # Try to get tokenizer from the model
             tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
+            # Decode the token
+            decoded = tokenizer.decode([token_id], skip_special_tokens=False)
+            # Clean up the decoded text (remove extra spaces, special formatting)
+            decoded = decoded.strip()
+            if not decoded:  # If empty after stripping
+                decoded = tokenizer.convert_ids_to_tokens([token_id])[0]
+            return decoded
         except Exception as e:
             return f"<decode_error_{token_id}>"
 
