@@ -60,6 +60,7 @@ def evaluate_model(model, tokenizer, eval_samples=None, split="test", generation
         eval_QAs = random.sample(eval_QAs, eval_samples)
     
     # Print the actual number of samples being evaluated
+    eval_QAs = eval_QAs[:100]
     print(f"Evaluating {len(eval_QAs)} samples")
     
     # Append evaluation info to the log
@@ -171,7 +172,7 @@ def main():
     # Create log directory and file
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"log_times_{times}_lr_{lr}.txt")
+    log_file = os.path.join(log_dir, f"log_analysis_times_{times}_lr_{lr}.txt")
     
     # Log basic information
     with open(log_file, "w") as f: # Use 'w' to overwrite for a new run
