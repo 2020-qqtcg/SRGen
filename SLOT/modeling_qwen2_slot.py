@@ -764,7 +764,8 @@ class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
 
 import os
 import json
-from transformers import AutoTokenizer
+import torch.nn.functional as F
+from datetime import datetime
 
 class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
@@ -776,6 +777,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         self.model = Qwen2Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        
+        # Initialize delta as None for entropy calculation
+        self.delta = None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -870,7 +874,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         )
 
         hidden_states = outputs[0]
-
+        
+        # Store original hidden states for entropy comparison
+        original_hidden_states = hidden_states.clone()
 
         ###### SLOT begin here
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
@@ -887,77 +893,23 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     loss_fct = nn.CrossEntropyLoss()
                     shift_logits = logits[..., :-1, :].contiguous()
                     
+                    # Use prompt as labels
                     shift_labels = input_ids[:, 1:].contiguous()
                     loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
                     loss.backward()
                     optimizer.step()
                 self.delta = delta
-                
-                # 计算熵并选择熵最大的20%的token来应用delta
-                with torch.no_grad():
-                    # 计算当前的logits用于熵计算
-                    current_logits = self.lm_head(hidden_states)
-                    # 计算概率分布
-                    probs = torch.softmax(current_logits, dim=-1)
-                    # 计算每个位置的熵
-                    entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)  # [batch_size, seq_len]
-                    
-                    # 找出熵最大的20%的位置
-                    batch_size, seq_len = entropy.shape
-                    top_k = max(1, int(seq_len * 0.2))  # 20%的token数量
-                    
-                    # 为每个batch找出熵最大的位置和对应的熵值
-                    top_entropies, top_indices = torch.topk(entropy, top_k, dim=-1)  # [batch_size, top_k]
-                    
-                    # 记录所有token的熵分析
-                    self._analyze_all_tokens_entropy(input_ids, hidden_states, entropy, top_indices, "training")
-                    
-                    # 创建mask
-                    entropy_mask = torch.zeros_like(entropy, dtype=torch.bool)
-                    for batch_idx in range(batch_size):
-                        entropy_mask[batch_idx, top_indices[batch_idx]] = True
-                    
-                    # 扩展mask到hidden_states的维度
-                    entropy_mask = entropy_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
-                    
-                # 对所有位置应用delta
                 hidden_states = hidden_states + self.delta
-                
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
         else:
-            # 计算熵并选择熵最大的20%的token来应用delta
-            with torch.no_grad():
-                # 计算当前的logits用于熵计算
-                current_logits = self.lm_head(hidden_states)
-                # 计算概率分布
-                probs = torch.softmax(current_logits, dim=-1)
-                # 计算每个位置的熵
-                entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)  # [batch_size, seq_len]
-                
-                # 找出熵最大的20%的位置
-                batch_size, seq_len = entropy.shape
-                top_k = max(1, int(seq_len * 0.2))  # 20%的token数量
-                
-                # 为每个batch找出熵最大的位置和对应的熵值
-                top_entropies, top_indices = torch.topk(entropy, top_k, dim=-1)  # [batch_size, top_k]
-                
-                # 记录所有token的熵分析
-                self._analyze_all_tokens_entropy(input_ids, hidden_states, entropy, top_indices, "inference")
-                
-                # 创建mask
-                entropy_mask = torch.zeros_like(entropy, dtype=torch.bool)
-                for batch_idx in range(batch_size):
-                    entropy_mask[batch_idx, top_indices[batch_idx]] = True
-                
-                # 扩展mask到hidden_states的维度
-                entropy_mask = entropy_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
-                
-            # 对所有位置应用delta
-            hidden_states = hidden_states + self.delta
+            if self.delta is not None:
+                hidden_states = hidden_states + self.delta
         ###### SLOT end here
-            
 
+        # Calculate entropy and record analysis if enabled
+        if os.environ.get("record_entropy", "False") == "True" and self.delta is not None:
+            self._record_entropy_analysis(original_hidden_states, hidden_states, input_ids, logits_to_keep)
 
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
@@ -979,230 +931,89 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             attentions=outputs.attentions,
         )
     
-    def _analyze_all_tokens_entropy(self, input_ids, hidden_states, entropy, top_indices, phase):
-        """分析所有token的熵和delta影响"""
+    def _record_entropy_analysis(self, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep):
+        """Record entropy analysis for tokens before and after applying delta"""
         try:
-            # 获取tokenizer路径
-            tokenizer_path = os.environ.get("TOKENIZER_PATH", self.config.name_or_path if hasattr(self.config, 'name_or_path') else "Qwen/Qwen2-7B")
+            # Calculate logits for both original and modified hidden states
+            slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
             
-            # 如果tokenizer还没有加载，则加载
-            if not hasattr(self, '_tokenizer') or self._tokenizer is None:
-                try:
-                    self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-                except:
-                    return
-            
-            batch_size, seq_len = entropy.shape
-            
-            # 计算应用delta前的logits（原始）
             with torch.no_grad():
-                original_logits = self.lm_head(hidden_states)
-                original_predictions = torch.argmax(original_logits, dim=-1)  # [batch_size, seq_len]
-                original_probs = torch.softmax(original_logits, dim=-1)  # [batch_size, seq_len, vocab_size]
+                original_logits = self.lm_head(original_hidden_states[:, slice_indices, :])
+                modified_logits = self.lm_head(modified_hidden_states[:, slice_indices, :])
                 
-                # 应用全局delta后的logits
-                if hasattr(self, 'delta'):
-                    modified_hidden = hidden_states + self.delta
-                    modified_logits = self.lm_head(modified_hidden)
-                    modified_predictions = torch.argmax(modified_logits, dim=-1)  # [batch_size, seq_len]
-                    modified_probs = torch.softmax(modified_logits, dim=-1)  # [batch_size, seq_len, vocab_size]
-                else:
-                    modified_predictions = original_predictions
-                    modified_probs = original_probs
-            
-            # 收集所有token信息
-            all_tokens_data = []
-            
-            for batch_idx in range(batch_size):
-                for pos in range(seq_len):
-                    if pos < input_ids.shape[1]:  # 确保位置有效
-                        entropy_val = entropy[batch_idx, pos].item()
-                        token_id = input_ids[batch_idx, pos].item()
-                        
-                        # 解码原始token
-                        try:
-                            token_text = self._tokenizer.decode([token_id], skip_special_tokens=False).strip()
-                        except:
-                            token_text = f"<token_id_{token_id}>"
-                        
-                        # 解码预测token（原始和修改后）
-                        try:
-                            original_pred_text = self._tokenizer.decode([original_predictions[batch_idx, pos].item()], skip_special_tokens=False).strip()
-                        except:
-                            original_pred_text = f"<token_id_{original_predictions[batch_idx, pos].item()}>"
-                        
-                        try:
-                            modified_pred_text = self._tokenizer.decode([modified_predictions[batch_idx, pos].item()], skip_special_tokens=False).strip()
-                        except:
-                            modified_pred_text = f"<token_id_{modified_predictions[batch_idx, pos].item()}>"
-                        
-                        # 检查预测是否有变化
-                        prediction_changed = original_predictions[batch_idx, pos].item() != modified_predictions[batch_idx, pos].item()
-                        
-                        all_tokens_data.append({
-                            'batch_idx': batch_idx,
-                            'position': pos,
-                            'token_id': token_id,
-                            'token_text': token_text,
-                            'entropy': entropy_val,
-                            'original_pred_id': original_predictions[batch_idx, pos].item(),
-                            'modified_pred_id': modified_predictions[batch_idx, pos].item(),
-                            'original_pred_text': original_pred_text,
-                            'modified_pred_text': modified_pred_text,
-                            'prediction_changed': prediction_changed,
-                            'phase': phase
-                        })
-            
-            # 按熵值降序排序
-            all_tokens_data.sort(key=lambda x: x['entropy'], reverse=True)
-            
-            # 统计分析
-            total_tokens = len(all_tokens_data)
-            changed_tokens = [token for token in all_tokens_data if token['prediction_changed']]
-            total_changed = len(changed_tokens)
-            
-            # 熵前20%的token
-            top_20_percent_count = max(1, int(total_tokens * 0.2))
-            top_20_percent_tokens = all_tokens_data[:top_20_percent_count]
-            top_20_percent_changed = [token for token in top_20_percent_tokens if token['prediction_changed']]
-            
-            # 为熵前20%的token添加详细概率分析
-            self._add_probability_analysis(top_20_percent_tokens, original_probs, modified_probs)
-            
-            # 计算统计数据
-            total_change_rate = (total_changed / total_tokens * 100) if total_tokens > 0 else 0
-            top_20_change_rate = (len(top_20_percent_changed) / top_20_percent_count * 100) if top_20_percent_count > 0 else 0
-            top_20_in_changed_rate = (len(top_20_percent_changed) / total_changed * 100) if total_changed > 0 else 0
-            
-            # 保存详细分析到文件
-            output_file = os.environ.get("ENTROPY_ANALYSIS_LOG", "entropy_analysis.txt")
-            
-            with open(output_file, 'a', encoding='utf-8') as f:
-                f.write(f"\n{'='*60}\n")
-                f.write(f"=== {phase.upper()} PHASE ENTROPY ANALYSIS ===\n")
-                f.write(f"{'='*60}\n")
+                # Calculate probabilities and entropy
+                original_probs = F.softmax(original_logits, dim=-1)
+                modified_probs = F.softmax(modified_logits, dim=-1)
                 
-                # 统计摘要
-                f.write(f"\n【统计摘要】\n")
-                f.write(f"总token数: {total_tokens}\n")
-                f.write(f"预测有变化的token数: {total_changed}\n")
-                f.write(f"总体变化比例: {total_change_rate:.2f}%\n")
-                f.write(f"熵前20%的token数: {top_20_percent_count}\n")
-                f.write(f"熵前20%中有变化的token数: {len(top_20_percent_changed)}\n")
-                f.write(f"熵前20%的变化比例: {top_20_change_rate:.2f}%\n")
-                f.write(f"变化token中熵前20%的占比: {top_20_in_changed_rate:.2f}%\n")
+                # Calculate entropy: -sum(p * log(p))
+                original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-10), dim=-1)
+                modified_entropy = -torch.sum(modified_probs * torch.log(modified_probs + 1e-10), dim=-1)
                 
-                # 详细token列表（按熵排序）
-                f.write(f"\n【所有Token按熵排序】\n")
-                for i, token in enumerate(all_tokens_data):
-                    rank_indicator = "⭐TOP20%" if i < top_20_percent_count else ""
-                    change_indicator = "🔄CHANGED" if token['prediction_changed'] else ""
-                    
-                    f.write(f"Rank {i+1:3d} {rank_indicator:8s} {change_indicator:9s} | "
-                           f"entropy={token['entropy']:6.3f} | pos={token['position']:3d} | "
-                           f"token='{token['token_text']:15s}' | "
-                           f"pred_before='{token['original_pred_text']:15s}' | "
-                           f"pred_after='{token['modified_pred_text']:15s}' | "
-                           f"batch={token['batch_idx']}\n")
+                # Get predicted tokens
+                original_tokens = torch.argmax(original_logits, dim=-1)
+                modified_tokens = torch.argmax(modified_logits, dim=-1)
                 
-                # 只显示有变化的token
-                if changed_tokens:
-                    f.write(f"\n【有预测变化的Token】\n")
-                    for i, token in enumerate(changed_tokens):
-                        is_top_20 = token in top_20_percent_changed
-                        rank_in_all = all_tokens_data.index(token) + 1
-                        indicator = "⭐TOP20%" if is_top_20 else ""
-                        
-                        f.write(f"{i+1:3d}. {indicator:8s} 整体排名={rank_in_all:3d} | "
-                               f"entropy={token['entropy']:6.3f} | pos={token['position']:3d} | "
-                               f"token='{token['token_text']:15s}' | "
-                               f"'{token['original_pred_text']:15s}' → '{token['modified_pred_text']:15s}' | "
-                               f"batch={token['batch_idx']}\n")
+                # Process each batch and sequence position
+                batch_size, seq_len = original_tokens.shape
                 
-                # 熵前20%token的详细概率分析
-                if top_20_percent_tokens:
-                    f.write(f"\n【熵前20%Token的Top-10预测概率分析】\n")
-                    for i, token in enumerate(top_20_percent_tokens):
-                        f.write(f"\n{i+1:2d}. Rank {i+1:3d} | entropy={token['entropy']:6.3f} | pos={token['position']:3d} | "
-                               f"token='{token['token_text']:15s}' | batch={token['batch_idx']}\n")
-                        
-                        if 'top10_analysis' in token:
-                            f.write(f"    【Delta前 Top-10预测】\n")
-                            for j, (word, prob) in enumerate(token['top10_analysis']['original_top10']):
-                                f.write(f"      {j+1:2d}. '{word:15s}' : {prob:6.3f}%\n")
+                # Get output file path
+                output_file = os.environ.get("entropy_output_file", "entropy_analysis.jsonl")
+                
+                # Prepare data for logging
+                entropy_data = []
+                
+                for batch_idx in range(batch_size):
+                    for seq_idx in range(seq_len):
+                        # Get the actual position in the full sequence
+                        if isinstance(logits_to_keep, int) and logits_to_keep > 0:
+                            # Only looking at last logits_to_keep tokens
+                            actual_seq_idx = input_ids.shape[1] - logits_to_keep + seq_idx
+                        else:
+                            actual_seq_idx = seq_idx
                             
-                            f.write(f"    【Delta后 Top-10预测】\n")
-                            for j, (word, prob) in enumerate(token['top10_analysis']['modified_top10']):
-                                f.write(f"      {j+1:2d}. '{word:15s}' : {prob:6.3f}%\n")
+                        # Skip if out of bounds
+                        if actual_seq_idx >= input_ids.shape[1]:
+                            continue
                             
-                            f.write(f"    【概率变化摘要】\n")
-                            f.write(f"      最高概率: {token['top10_analysis']['max_prob_change']:.3f}% → {token['top10_analysis']['max_prob_after']:.3f}%\n")
-                            f.write(f"      预测变化: {token['top10_analysis']['prediction_change']}\n")
+                        # Get input token (the token that produced this prediction)
+                        input_token = input_ids[batch_idx, actual_seq_idx].item()
+                        
+                        record = {
+                            "timestamp": datetime.now().isoformat(),
+                            "batch_idx": batch_idx,
+                            "seq_idx": actual_seq_idx,
+                            "input_token": input_token,
+                            "input_token_decoded": self._safe_decode_token(input_token),
+                            "original_predicted_token": original_tokens[batch_idx, seq_idx].item(),
+                            "original_predicted_decoded": self._safe_decode_token(original_tokens[batch_idx, seq_idx].item()),
+                            "original_entropy": original_entropy[batch_idx, seq_idx].item(),
+                            "modified_predicted_token": modified_tokens[batch_idx, seq_idx].item(),
+                            "modified_predicted_decoded": self._safe_decode_token(modified_tokens[batch_idx, seq_idx].item()),
+                            "modified_entropy": modified_entropy[batch_idx, seq_idx].item(),
+                            "entropy_diff": (modified_entropy[batch_idx, seq_idx] - original_entropy[batch_idx, seq_idx]).item(),
+                        }
+                        entropy_data.append(record)
                 
-                f.write("\n")
-                
+                # Write to file
+                with open(output_file, "a", encoding="utf-8") as f:
+                    for record in entropy_data:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        
         except Exception as e:
-            print(f"Warning: Failed to analyze entropy tokens: {e}")
-            pass
+            # Log error but don't interrupt the forward pass
+            print(f"Error in entropy analysis: {e}")
     
-    def _add_probability_analysis(self, top_tokens, original_probs, modified_probs):
-        """为熵前20%的token添加详细概率分析"""
+    def _safe_decode_token(self, token_id):
+        """Safely decode a token ID to text, handling potential errors"""
         try:
-            if not hasattr(self, '_tokenizer') or self._tokenizer is None:
-                return
-            
-            for token_data in top_tokens:
-                batch_idx = token_data['batch_idx']
-                pos = token_data['position']
-                
-                # 获取该位置的概率分布
-                orig_prob_dist = original_probs[batch_idx, pos]  # [vocab_size]
-                mod_prob_dist = modified_probs[batch_idx, pos]   # [vocab_size]
-                
-                # 获取原始top-10预测
-                orig_top10_probs, orig_top10_indices = torch.topk(orig_prob_dist, k=10)
-                orig_top10_words = []
-                for idx in orig_top10_indices:
-                    try:
-                        word = self._tokenizer.decode([idx.item()], skip_special_tokens=False).strip()
-                        if not word:
-                            word = f"<id_{idx.item()}>"
-                    except:
-                        word = f"<id_{idx.item()}>"
-                    orig_top10_words.append((word, orig_top10_probs[len(orig_top10_words)].item() * 100))
-                
-                # 获取修改后top-10预测
-                mod_top10_probs, mod_top10_indices = torch.topk(mod_prob_dist, k=10)
-                mod_top10_words = []
-                for idx in mod_top10_indices:
-                    try:
-                        word = self._tokenizer.decode([idx.item()], skip_special_tokens=False).strip()
-                        if not word:
-                            word = f"<id_{idx.item()}>"
-                    except:
-                        word = f"<id_{idx.item()}>"
-                    mod_top10_words.append((word, mod_top10_probs[len(mod_top10_words)].item() * 100))
-                
-                # 分析概率变化
-                max_prob_before = orig_top10_probs[0].item() * 100
-                max_prob_after = mod_top10_probs[0].item() * 100
-                top_pred_before = orig_top10_indices[0].item()
-                top_pred_after = mod_top10_indices[0].item()
-                prediction_changed = top_pred_before != top_pred_after
-                
-                # 将分析结果添加到token数据中
-                token_data['top10_analysis'] = {
-                    'original_top10': orig_top10_words,
-                    'modified_top10': mod_top10_words,
-                    'max_prob_change': max_prob_before,
-                    'max_prob_after': max_prob_after,
-                    'prediction_change': 'YES' if prediction_changed else 'NO',
-                    'prob_shift': max_prob_after - max_prob_before
-                }
-                
+            # Try to get tokenizer from the model
+            if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+                return self.tokenizer.decode([token_id], skip_special_tokens=False)
+            else:
+                # Return token ID as string if no tokenizer available
+                return f"<token_{token_id}>"
         except Exception as e:
-            print(f"Warning: Failed to analyze probabilities: {e}")
-            pass
+            return f"<decode_error_{token_id}>"
 
 
 @add_start_docstrings(
