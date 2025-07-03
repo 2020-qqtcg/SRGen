@@ -148,4 +148,6 @@ Desktop.ini
 *.swp
 *~ 
 
-analysis.jsonl
+analysis_*/
+analysis/source/
+comparison_*/

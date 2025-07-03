@@ -60,7 +60,6 @@ def evaluate_model(model, tokenizer, eval_samples=None, split="test", generation
         eval_QAs = random.sample(eval_QAs, eval_samples)
     
     # Print the actual number of samples being evaluated
-    eval_QAs = eval_QAs[:100]
     print(f"Evaluating {len(eval_QAs)} samples")
     
     # Append evaluation info to the log

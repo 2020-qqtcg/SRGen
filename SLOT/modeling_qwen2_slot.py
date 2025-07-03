@@ -902,7 +902,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 
                 # Apply delta with entropy threshold check
                 entropy_threshold = float(os.environ.get("entropy_threshold", "0.0"))
-                hidden_states = self._apply_delta_with_entropy_check(hidden_states, entropy_threshold)
+                if entropy_threshold == 0.0:
+                    hidden_states = hidden_states + self.delta
+                else:
+                    hidden_states = self._apply_delta_with_entropy_check(hidden_states, entropy_threshold)
                 
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
