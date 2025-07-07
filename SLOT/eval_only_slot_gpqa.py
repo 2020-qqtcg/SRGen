@@ -90,7 +90,7 @@ def evaluate_model(model, tokenizer, eval_samples=None, split="train", generatio
     random.seed(seed)
     
     # Load the evaluation dataset
-    eval_dataset = load_dataset("Idavidrein/gpqa", subset="gpqa_diamond", split=split)
+    eval_dataset = load_dataset("Idavidrein/gpqa", "gpqa_diamond", split=split)
     filterd_data = []
     for row in eval_dataset:
         choices = [
@@ -107,14 +107,13 @@ def evaluate_model(model, tokenizer, eval_samples=None, split="train", generatio
         )
         correct_answer_idx = choices.index(row['Correct Answer'].strip())
 
-        task_template = """
-        {Question}
+        task_template = """{Question}
 
-        A) {A}
-        B) {B}
-        C) {C}
-        D) {D}
-        """
+A) {A}
+B) {B}
+C) {C}
+D) {D}
+""".strip()
 
         task = task_template.format(
             Question=choices_dict['Question'],
