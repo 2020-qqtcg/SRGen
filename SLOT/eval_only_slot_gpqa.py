@@ -334,7 +334,7 @@ def main():
     generation_params = {
         "do_sample": False,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": 512 # Added a sensible default, adjust if needed
+        "max_new_tokens": 4096 # Added a sensible default, adjust if needed
     }
 
     # Set environment variables from command line arguments
