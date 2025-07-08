@@ -28,68 +28,15 @@ trap 'handle_error $LINENO' ERR
 
 echo "Starting TNOT evaluation with error logging..."
 
-## SLOT with iters=5
-echo "Running SLOT with iters=0..." | tee -a "$ERROR_LOG"
-
-# 设置环境变量
-export times=0
-export lr=0.1
-export record_entropy=False
-export entropy_output_file="my_analysis.jsonl"
-export tokenizer_path=$model_path
-export entropy_threshold=0.0
-
-# 运行评估
 python eval_only_slot_gpqa.py \
     --model_path $model_path \
-    2>&1 | tee -a "$ERROR_LOG"
-
-## SLOT with iters=5
-echo "Running SLOT with iters=3..." | tee -a "$ERROR_LOG"
-
-# 设置环境变量
-export times=3
-export lr=0.1
-export record_entropy=False
-export entropy_output_file="my_analysis.jsonl"
-export tokenizer_path=$model_path
-export entropy_threshold=0.0
-
-# 运行评估
-python eval_only_slot_gpqa.py \
-    --model_path $model_path \
-    2>&1 | tee -a "$ERROR_LOG"
-
-## SLOT with iters=5
-echo "Running SLOT with iters=3..." | tee -a "$ERROR_LOG"
-
-# 设置环境变量
-export times=5
-export lr=0.1
-export record_entropy=False
-export entropy_output_file="my_analysis.jsonl"
-export tokenizer_path=$model_path
-export entropy_threshold=0.0
-
-# 运行评估
-python eval_only_slot_gpqa.py \
-    --model_path $model_path \
-    2>&1 | tee -a "$ERROR_LOG"
-
-## SLOT with iters=5
-echo "Running SLOT with iters=3..." | tee -a "$ERROR_LOG"
-
-# 设置环境变量
-export times=5
-export lr=0.1
-export record_entropy=False
-export entropy_output_file="my_analysis.jsonl"
-export tokenizer_path=$model_path
-export entropy_threshold=0.672
-
-# 运行评估
-python eval_only_slot_gpqa.py \
-    --model_path $model_path \
+    --times 0 \
+    --lr 0.1 \
+    --entropy_output_file "my_analysis.jsonl" \
+    --entropy_threshold 0.0 \
+    --entropy_weight 0.1 \
+    --use_entropy_control \
+    --max_retries 10 \
     2>&1 | tee -a "$ERROR_LOG"
 
 echo "=== TNOT Script Execution Completed Successfully at $(date) ===" >> "$ERROR_LOG"
