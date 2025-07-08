@@ -152,7 +152,11 @@ def evaluate_model(model, tokenizer, eval_samples=None, split="train", generatio
     
     # Load the evaluation dataset
     eval_dataset = load_dataset("Idavidrein/gpqa", "gpqa_diamond", split=split)
-    filterd_data = []
+    filterd_data = {
+        "question": [],
+        "answer": [],
+        "golden_answer": []
+    }
     for row in eval_dataset:
         choices = [
             row['Incorrect Answer 1'],
@@ -188,11 +192,10 @@ D) {D}
             else "C" if correct_answer_idx == 2 \
             else "D"
 
-        filterd_data.append({
-            "question": task,
-            "answer": answer,
-            "golden_answer": row["Explanation"]
-        })
+        filterd_data['question'].append(task)
+        filterd_data['answer'].append(answer)
+        filterd_data['golden_answer'].append(row["Explanation"])
+
     eval_QAs = [{'Q':x, 'A':y.split('####')[-1].strip()} 
                 for x,y in zip(filterd_data['question'], filterd_data['answer'])]
     
