@@ -87,6 +87,7 @@ def generate_with_entropy_control(model, tokenizer, inputs, generation_params, m
     """
     Generate text with entropy-based early stopping and continuation.
     If high entropy is detected, continue generation from the partial result.
+    After max retries, continue with normal generation without entropy control.
     Returns: (completion_text, retry_count)
     """
     # Enable entropy control
@@ -120,11 +121,6 @@ def generate_with_entropy_control(model, tokenizer, inputs, generation_params, m
             # Add partial completion to full result
             full_completion += completion_part
             
-            # Check if the partial completion ends with EOS or is empty
-            if not completion_part.strip() or tokenizer.eos_token in completion_part:
-                print("Generation ended due to EOS or empty completion")
-                break
-            
             # Prepare for next iteration: append partial result to original input
             new_text = tokenizer.decode(current_inputs['input_ids'][0], skip_special_tokens=True) + completion_part
             current_inputs = tokenizer(new_text, return_tensors="pt", add_special_tokens=False).to(model.device)
@@ -137,10 +133,37 @@ def generate_with_entropy_control(model, tokenizer, inputs, generation_params, m
             print(f"Generation completed normally after {retry_count} retries")
             break
     
+    # Check if we exited due to max retries (high entropy) or normal completion
     if retry_count >= max_retries:
-        print(f"Max retries ({max_retries}) reached, stopping generation")
+        # Exited due to reaching max retries, continue with normal generation
+        print(f"Max retries ({max_retries}) reached due to high entropy, continuing with normal generation")
+        
+        # Disable entropy control and prompt_only training
+        os.environ["entropy_control"] = "False"
+        os.environ["prompt_only"] = "False"
+        
+        # Reset entropy detection state
+        model.reset_entropy_detection()
+        
+        # Continue generation normally from current state
+        print(f"Continuing normal generation from {current_inputs['input_ids'].shape[1]} tokens")
+        final_outputs = model.generate(
+            **current_inputs,
+            **generation_params,
+        )
+        
+        # Get the final completion part
+        final_new_tokens = final_outputs[0][current_inputs['input_ids'].shape[1]:]
+        final_completion_part = tokenizer.decode(final_new_tokens, skip_special_tokens=True)
+        
+        # Add to full completion
+        full_completion += final_completion_part
+        print(f"Normal generation completed, added {len(final_new_tokens)} tokens")
+    else:
+        # Exited due to normal completion (no high entropy detected in last iteration)
+        print(f"Generation completed normally after {retry_count} retries")
     
-    # Disable entropy control after generation
+    # Always disable entropy control after generation
     os.environ["entropy_control"] = "False"
     
     return full_completion, retry_count
