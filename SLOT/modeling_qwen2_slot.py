@@ -931,13 +931,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         if os.environ.get("record_entropy", "False") == "True" and self.delta is not None:
             self._record_entropy_analysis(original_hidden_states, hidden_states, input_ids, logits_to_keep)
 
+        stage = "generation" if logits.shape[1] == 1 else "prompt"
+
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
 
         # Add entropy-based early stopping logic
         entropy_control_enabled = os.environ.get("entropy_control", "False") == "True"
-        if entropy_control_enabled and logits.shape[1] > 0:  # Only during generation (not training)
+        if entropy_control_enabled and logits.shape[1] > 0 and stage == "generation":  # Only during generation (not training)
             entropy_threshold = float(os.environ.get("entropy_threshold", "5.0"))
             
             # Calculate entropy for the last token position
