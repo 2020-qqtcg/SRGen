@@ -87,6 +87,7 @@ def generate_with_entropy_control(model, tokenizer, inputs, generation_params, m
     """
     Generate text with entropy-based early stopping and continuation.
     If high entropy is detected, continue generation from the partial result.
+    Returns: (completion_text, retry_count)
     """
     # Enable entropy control
     os.environ["entropy_control"] = "True"
@@ -142,7 +143,7 @@ def generate_with_entropy_control(model, tokenizer, inputs, generation_params, m
     # Disable entropy control after generation
     os.environ["entropy_control"] = "False"
     
-    return full_completion
+    return full_completion, retry_count
 
 def evaluate_model(model, tokenizer, eval_samples=None, split="train", generation_params=None, seed=42, log_file="evaluation_log.txt"):
     """Evaluates the model's performance on the GPQA dataset."""
@@ -217,6 +218,7 @@ Answer the following multiple choice question. The last line of your response sh
     correct = 0
     format_correct = 0
     total = len(eval_QAs)
+    total_retries = 0  # Track total retry count across all samples
     
     for i, qa in enumerate(eval_QAs):
         if (i + 1) % 10 == 0:
@@ -233,8 +235,10 @@ Answer the following multiple choice question. The last line of your response sh
         # Use entropy-controlled generation if enabled
         use_entropy_control = os.environ.get("use_entropy_control", "False") == "True"
         if use_entropy_control:
+            print(f"\n--- Sample {i+1} use_entropy_control start---")
             max_retries = int(os.environ.get("max_retries", "5"))
-            completion = generate_with_entropy_control(model, tokenizer, inputs, generation_params, max_retries)
+            completion, retry_count = generate_with_entropy_control(model, tokenizer, inputs, generation_params, max_retries)
+            print(f"--- Sample {i+1} use_entropy_control end---")
         else:
             os.environ["prompt_only"] = "True"
             outputs = model.generate(
@@ -242,6 +246,7 @@ Answer the following multiple choice question. The last line of your response sh
                 **generation_params,
             )
             completion = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+            retry_count = 0  # No retries for normal generation
         
         # Check format and correctness
         format_score = reward_format(qa, completion)
@@ -254,6 +259,9 @@ Answer the following multiple choice question. The last line of your response sh
             format_correct += 1
         if is_answer_correct:
             correct += 1
+        
+        # Track total retries
+        total_retries += retry_count
             
         # Log sample information
         with open(log_file, "a") as f:
@@ -261,7 +269,8 @@ Answer the following multiple choice question. The last line of your response sh
             f.write(f"Question: {qa['Q']}\n")
             f.write(f"Model Response: {completion}\n")
             f.write(f"Correct Answer: {qa['A']}\n")
-            f.write(f"Format Correct: {is_format_correct}, Answer Correct: {is_answer_correct}\n\n")
+            f.write(f"Format Correct: {is_format_correct}, Answer Correct: {is_answer_correct}\n")
+            f.write(f"Retry Count: {retry_count}\n\n")
             
         # Print detailed information for every sample
         print(f"\n--- Sample {i+1} ---")
@@ -269,19 +278,25 @@ Answer the following multiple choice question. The last line of your response sh
         print("Model Response:", completion)
         print("Correct Answer:", qa['A'])
         print(f"Format Correct: {is_format_correct}, Answer Correct: {is_answer_correct}")
+        print(f"Retry Count: {retry_count}")
     
     accuracy = correct / total if total > 0 else 0
     format_accuracy = format_correct / total if total > 0 else 0
+    avg_retries = total_retries / total if total > 0 else 0
     
     print(f"\nEvaluation Results (Samples: {total}):")
     print(f"Answer Accuracy: {accuracy:.4f}")
     print(f"Format Accuracy: {format_accuracy:.4f}")
+    print(f"Total Retries: {total_retries}")
+    print(f"Average Retries per Sample: {avg_retries:.2f}")
     
     # Log overall results
     with open(log_file, "a") as f:
         f.write(f"Evaluation Results (Samples: {total}):\n")
         f.write(f"Answer Accuracy: {accuracy:.4f}\n")
         f.write(f"Format Accuracy: {format_accuracy:.4f}\n")
+        f.write(f"Total Retries: {total_retries}\n")
+        f.write(f"Average Retries per Sample: {avg_retries:.2f}\n")
     
     return accuracy, format_accuracy
 
