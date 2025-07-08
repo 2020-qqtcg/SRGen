@@ -883,6 +883,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
 
         ###### SLOT begin here
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
+        stage = "prompt" if prompt_only else "generation"
         if prompt_only:
             times = int(os.environ.get("times", 1))
             lr = float(os.environ.get("lr", 0.1))
@@ -930,8 +931,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         # Calculate entropy and record analysis if enabled
         if os.environ.get("record_entropy", "False") == "True" and self.delta is not None:
             self._record_entropy_analysis(original_hidden_states, hidden_states, input_ids, logits_to_keep)
-
-        stage = "generation" if logits.shape[1] == 1 else "prompt"
 
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
