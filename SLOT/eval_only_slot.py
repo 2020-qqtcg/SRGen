@@ -298,7 +298,7 @@ def main():
     # Create log directory and file
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    entropy_suffix = f"_entropy_{args.entropy_threshold}" if args.use_entropy_control else ""
+    entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
     log_file = os.path.join(log_dir, f"log_analysis_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
     
     # Log basic information
