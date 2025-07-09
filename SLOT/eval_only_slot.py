@@ -160,6 +160,9 @@ The reasoning process and answer are enclosed within <think> </think> and<answer
     total_retries = 0  # Track total retry count across all samples
     
     for i, qa in enumerate(eval_QAs):
+        if model.delta is not None:
+            model.delta = None
+            
         if (i + 1) % 10 == 0:
             print(f"Evaluated {i+1}/{total} samples")
             

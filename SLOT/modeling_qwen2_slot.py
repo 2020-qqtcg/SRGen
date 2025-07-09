@@ -919,26 +919,27 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     optimizer_high.step()
                 
                 # Optimize delta_normal with only cross-entropy loss
-                optimizer_normal = torch.optim.AdamW([delta_normal], lr=lr, weight_decay=1e-8, eps=1e-5)
-                for _ in range(times):
-                    optimizer_normal.zero_grad()
-                    transformed_hidden = hidden_states + delta_normal
-                    logits = self.lm_head(transformed_hidden)
-                    loss_fct = nn.CrossEntropyLoss()
-                    shift_logits = logits[..., :-1, :].contiguous()
+                if self.delta is None:
+                    optimizer_normal = torch.optim.AdamW([delta_normal], lr=lr, weight_decay=1e-8, eps=1e-5)
+                    for _ in range(times):
+                        optimizer_normal.zero_grad()
+                        transformed_hidden = hidden_states + delta_normal
+                        logits = self.lm_head(transformed_hidden)
+                        loss_fct = nn.CrossEntropyLoss()
+                        shift_logits = logits[..., :-1, :].contiguous()
+                        
+                        # Use prompt as labels
+                        shift_labels = input_ids[:, 1:].contiguous()
+                        ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                        
+                        # Only use cross-entropy loss for delta_normal
+                        loss = ce_loss
+                        
+                        loss.backward()
+                        optimizer_normal.step()
                     
-                    # Use prompt as labels
-                    shift_labels = input_ids[:, 1:].contiguous()
-                    ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-                    
-                    # Only use cross-entropy loss for delta_normal
-                    loss = ce_loss
-                    
-                    loss.backward()
-                    optimizer_normal.step()
-                
-                # Store delta_normal for subsequent generation stages
-                self.delta = delta_normal
+                    # Store delta_normal for subsequent generation stages
+                    self.delta = delta_normal
                 
                 # Apply delta_high for current prompt processing
                 hidden_states = hidden_states + delta_high
