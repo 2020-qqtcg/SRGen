@@ -888,11 +888,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             times = int(os.environ.get("times", 1))
             lr = float(os.environ.get("lr", 0.1))
             with torch.enable_grad():
-                delta = nn.Parameter(0.0 * torch.randn([1,1, hidden_states.shape[-1]]).to(hidden_states))
-                optimizer = torch.optim.AdamW([delta], lr=lr, weight_decay=1e-8, eps=1e-5)
+                # Initialize two deltas
+                delta_high = nn.Parameter(0.0 * torch.randn([1,1, hidden_states.shape[-1]]).to(hidden_states))
+                delta_normal = nn.Parameter(0.0 * torch.randn([1,1, hidden_states.shape[-1]]).to(hidden_states))
+                
+                # Optimize delta_high with joint loss (CE + entropy)
+                optimizer_high = torch.optim.AdamW([delta_high], lr=lr, weight_decay=1e-8, eps=1e-5)
                 for _ in range(times):
-                    optimizer.zero_grad()
-                    transformed_hidden = hidden_states + delta
+                    optimizer_high.zero_grad()
+                    transformed_hidden = hidden_states + delta_high
                     logits = self.lm_head(transformed_hidden)
                     loss_fct = nn.CrossEntropyLoss()
                     shift_logits = logits[..., :-1, :].contiguous()
@@ -912,19 +916,38 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     loss = (1 - entropy_weight) * ce_loss + entropy_weight * entropy_loss
                     
                     loss.backward()
-                    optimizer.step()
-                self.delta = delta
+                    optimizer_high.step()
                 
-                # Apply delta with entropy threshold check
-                entropy_threshold = float(os.environ.get("entropy_threshold", "0.0"))
-                hidden_states = hidden_states + self.delta
+                # Optimize delta_normal with only cross-entropy loss
+                optimizer_normal = torch.optim.AdamW([delta_normal], lr=lr, weight_decay=1e-8, eps=1e-5)
+                for _ in range(times):
+                    optimizer_normal.zero_grad()
+                    transformed_hidden = hidden_states + delta_normal
+                    logits = self.lm_head(transformed_hidden)
+                    loss_fct = nn.CrossEntropyLoss()
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    
+                    # Use prompt as labels
+                    shift_labels = input_ids[:, 1:].contiguous()
+                    ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                    
+                    # Only use cross-entropy loss for delta_normal
+                    loss = ce_loss
+                    
+                    loss.backward()
+                    optimizer_normal.step()
+                
+                # Store delta_normal for subsequent generation stages
+                self.delta = delta_normal
+                
+                # Apply delta_high for current prompt processing
+                hidden_states = hidden_states + delta_high
             
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
         else:
             if self.delta is not None:
-                # Apply delta with entropy threshold check
-                entropy_threshold = float(os.environ.get("entropy_threshold", "0.0"))
+                # Apply delta_normal (cross-entropy optimized) for generation
                 hidden_states = hidden_states + self.delta
         ###### SLOT end here
 
