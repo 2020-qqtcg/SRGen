@@ -111,15 +111,18 @@ D) {D}
         return """You are a helpful assistant. A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the user with the answer.\
 Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering."""
 
+    def setup_logging(self, args):
+        return super().setup_logging(args, benchmark_name="gpqa")
+
 def main():
-    args = BaseEvaluator.setup_args()
-    
-    # Setup environment and logging
-    BaseEvaluator.setup_environment(args)
-    log_file = BaseEvaluator.setup_logging(args)
-    
     # Initialize evaluator
     evaluator = GPQAEvaluator()
+    args = evaluator.setup_args()
+    
+    # Setup environment and logging
+    evaluator.setup_environment(args)
+    log_file = evaluator.setup_logging(args)
+    
     evaluator.load_model(args.model_path)
     
     # Set generation parameters

@@ -51,7 +51,7 @@ class BaseEvaluator:
         
         while retry_count < max_retries:
             self.model.reset_entropy_detection()
-            os.environ["prompt_only"] = "True"
+            os.environ["prompt_only"] = "True"  
             
             outputs = self.model.generate(
                 **current_inputs,
@@ -196,64 +196,67 @@ class BaseEvaluator:
         
         return accuracy, format_accuracy
 
-def setup_args():
-    """Setup command line arguments"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str, default="/ssdwork/huyang/r1/simple_GRPO_debug/slot_gsm8k/models/Qwen2.5-7B", help="Path to the model")
-    parser.add_argument("--eval_samples", type=int, default=None, help="Number of samples to evaluate, None for full evaluation")
-    parser.add_argument("--split", type=str, default="test", choices=["test", "train"], help="Dataset split to evaluate on")
-    parser.add_argument("--do_sample", action="store_true", help="Whether to use sampling for generation")
-    parser.add_argument("--temperature", type=float, default=0.9, help="Generation temperature")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for consistent evaluation samples")
-    parser.add_argument("--use_entropy_control", action="store_true", help="Enable entropy-based early stopping and continuation")
-    parser.add_argument("--entropy_threshold", type=float, default=5.0, help="Entropy threshold for early stopping")
-    parser.add_argument("--max_retries", type=int, default=5, help="Maximum number of retries for entropy-controlled generation")
-    parser.add_argument("--times", type=int, default=0, help="Number of optimization iterations")
-    parser.add_argument("--lr", type=float, default=0.1, help="Learning rate for optimization")
-    parser.add_argument("--record_entropy", action="store_true", help="Whether to record entropy analysis")
-    parser.add_argument("--entropy_output_file", type=str, default="my_analysis.jsonl", help="Output file for entropy analysis")
-    parser.add_argument("--entropy_weight", type=float, default=0.1, help="Weight for entropy loss")
-    return parser.parse_args()
+    @staticmethod
+    def setup_args():
+        """Setup command line arguments"""
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--model_path", type=str, default="/ssdwork/huyang/r1/simple_GRPO_debug/slot_gsm8k/models/Qwen2.5-7B", help="Path to the model")
+        parser.add_argument("--eval_samples", type=int, default=None, help="Number of samples to evaluate, None for full evaluation")
+        parser.add_argument("--split", type=str, default="test", choices=["test", "train"], help="Dataset split to evaluate on")
+        parser.add_argument("--do_sample", action="store_true", help="Whether to use sampling for generation")
+        parser.add_argument("--temperature", type=float, default=0.9, help="Generation temperature")
+        parser.add_argument("--seed", type=int, default=42, help="Random seed for consistent evaluation samples")
+        parser.add_argument("--use_entropy_control", action="store_true", help="Enable entropy-based early stopping and continuation")
+        parser.add_argument("--entropy_threshold", type=float, default=5.0, help="Entropy threshold for early stopping")
+        parser.add_argument("--max_retries", type=int, default=5, help="Maximum number of retries for entropy-controlled generation")
+        parser.add_argument("--times", type=int, default=0, help="Number of optimization iterations")
+        parser.add_argument("--lr", type=float, default=0.1, help="Learning rate for optimization")
+        parser.add_argument("--record_entropy", action="store_true", help="Whether to record entropy analysis")
+        parser.add_argument("--entropy_output_file", type=str, default="my_analysis.jsonl", help="Output file for entropy analysis")
+        parser.add_argument("--entropy_weight", type=float, default=0.1, help="Weight for entropy loss")
+        return parser.parse_args()
 
-def setup_environment(args):
-    """Setup environment variables"""
-    os.environ["times"] = str(args.times)
-    os.environ["lr"] = str(args.lr)
-    os.environ["record_entropy"] = str(args.record_entropy).lower()
-    os.environ["entropy_output_file"] = args.entropy_output_file
-    os.environ["tokenizer_path"] = args.model_path
-    os.environ["entropy_threshold"] = str(args.entropy_threshold)
-    os.environ["entropy_weight"] = str(args.entropy_weight)
-    
-    if args.use_entropy_control:
-        os.environ["use_entropy_control"] = "True"
+    @staticmethod
+    def setup_environment(args):
+        """Setup environment variables"""
+        os.environ["times"] = str(args.times)
+        os.environ["lr"] = str(args.lr)
+        os.environ["record_entropy"] = str(args.record_entropy).lower()
+        os.environ["entropy_output_file"] = args.entropy_output_file
+        os.environ["tokenizer_path"] = args.model_path
         os.environ["entropy_threshold"] = str(args.entropy_threshold)
-        os.environ["max_retries"] = str(args.max_retries)
-        print(f"Entropy control enabled with threshold: {args.entropy_threshold}, max retries: {args.max_retries}")
-    else:
-        os.environ["use_entropy_control"] = "False"
+        os.environ["entropy_weight"] = str(args.entropy_weight)
+        
+        if args.use_entropy_control:
+            os.environ["use_entropy_control"] = "True"
+            os.environ["entropy_threshold"] = str(args.entropy_threshold)
+            os.environ["max_retries"] = str(args.max_retries)
+            print(f"Entropy control enabled with threshold: {args.entropy_threshold}, max retries: {args.max_retries}")
+        else:
+            os.environ["use_entropy_control"] = "False"
 
-def setup_logging(args):
-    """Setup logging directory and file"""
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
-    log_file = os.path.join(log_dir, f"log_analysis_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
-    
-    with open(log_file, "w") as f:
-        f.write(f"Model Path: {args.model_path}\n")
-        f.write(f"Times: {args.times}\n")
-        f.write(f"LR: {args.lr}\n")
-        f.write(f"Record Entropy: {args.record_entropy}\n")
-        f.write(f"Entropy Output File: {args.entropy_output_file}\n")
-        f.write(f"Entropy Weight: {args.entropy_weight}\n")
-        f.write(f"Eval Samples: {'All' if args.eval_samples is None else args.eval_samples}\n")
-        f.write(f"Dataset Split: {args.split}\n")
-        f.write(f"Do Sample: {args.do_sample}\n")
-        f.write(f"Temperature: {args.temperature}\n")
-        f.write(f"Seed: {args.seed}\n")
-        f.write(f"Use Entropy Control: {args.use_entropy_control}\n")
-        f.write(f"Entropy Threshold: {args.entropy_threshold}\n")
-        f.write(f"Max Retries: {args.max_retries}\n\n")
-    
-    return log_file
+    @staticmethod
+    def setup_logging(args, benchmark_name: str = "base"):
+        """Setup logging directory and file"""
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
+        log_file = os.path.join(log_dir, f"log_{benchmark_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
+        
+        with open(log_file, "w") as f:
+            f.write(f"Model Path: {args.model_path}\n")
+            f.write(f"Times: {args.times}\n")
+            f.write(f"LR: {args.lr}\n")
+            f.write(f"Record Entropy: {args.record_entropy}\n")
+            f.write(f"Entropy Output File: {args.entropy_output_file}\n")
+            f.write(f"Entropy Weight: {args.entropy_weight}\n")
+            f.write(f"Eval Samples: {'All' if args.eval_samples is None else args.eval_samples}\n")
+            f.write(f"Dataset Split: {args.split}\n")
+            f.write(f"Do Sample: {args.do_sample}\n")
+            f.write(f"Temperature: {args.temperature}\n")
+            f.write(f"Seed: {args.seed}\n")
+            f.write(f"Use Entropy Control: {args.use_entropy_control}\n")
+            f.write(f"Entropy Threshold: {args.entropy_threshold}\n")
+            f.write(f"Max Retries: {args.max_retries}\n\n")
+        
+        return log_file

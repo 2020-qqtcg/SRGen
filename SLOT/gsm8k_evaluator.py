@@ -49,15 +49,18 @@ class GSM8KEvaluator(BaseEvaluator):
         return """You are a helpful assistant. A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the user with the answer.\
 The reasoning process and answer are enclosed within <think> </think> and<answer> </answer> tags, respectively, i.e., <think> reasoning process here </think><answer> answer here </answer>."""
 
+    def setup_logging(self, args):
+        return super().setup_logging(args, benchmark_name="gsm8k")
+
 def main():
-    args = BaseEvaluator.setup_args()
-    
-    # Setup environment and logging
-    BaseEvaluator.setup_environment(args)
-    log_file = BaseEvaluator.setup_logging(args)
     
     # Initialize evaluator
     evaluator = GSM8KEvaluator()
+    args = evaluator.setup_args()
+    
+    # Setup environment and logging
+    evaluator.setup_environment(args)
+    log_file = evaluator.setup_logging(args)
     evaluator.load_model(args.model_path)
     
     # Set generation parameters
