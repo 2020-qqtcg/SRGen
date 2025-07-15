@@ -1,7 +1,7 @@
 import re
 import random
 from datasets import load_dataset
-from base_evaluator import BaseEvaluator
+from SLOT.base_evaluator import BaseEvaluator
 
 class GPQAEvaluator(BaseEvaluator):
     def load_dataset(self, split="train", eval_samples=None):

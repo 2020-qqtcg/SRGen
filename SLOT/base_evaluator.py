@@ -4,7 +4,7 @@ import random
 import argparse
 import torch
 from transformers import AutoTokenizer
-from modeling_qwen2_slot import Qwen2ForCausalLM
+from SLOT.modeling_qwen2_slot import Qwen2ForCausalLM
 
 class BaseEvaluator:
     def __init__(self):

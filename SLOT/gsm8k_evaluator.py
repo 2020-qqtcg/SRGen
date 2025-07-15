@@ -1,7 +1,7 @@
 import re
 import random
 from datasets import load_dataset
-from base_evaluator import BaseEvaluator
+from SLOT.base_evaluator import BaseEvaluator
 
 class GSM8KEvaluator(BaseEvaluator):
     def load_dataset(self, split="test", eval_samples=None):
