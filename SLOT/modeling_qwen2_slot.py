@@ -956,6 +956,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         if os.environ.get("record_entropy", "False") == "True" and self.delta is not None:
             self._record_entropy_analysis(original_hidden_states, hidden_states, input_ids, logits_to_keep)
 
+        # Record prompt entropy percentiles if enabled
+        if os.environ.get("record_prompt_entropy", "False") == "True":
+            self._record_prompt_entropy_percentiles(hidden_states, input_ids)
+
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
@@ -1091,6 +1095,65 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             # Log error but don't interrupt the forward pass
             print(f"Error in entropy analysis: {e}")
     
+    def _record_prompt_entropy_percentiles(self, hidden_states, input_ids):
+        """Record entropy percentiles for prompt positions"""
+        try:
+            with torch.no_grad():
+                # Calculate logits for all positions
+                logits = self.lm_head(hidden_states)
+                
+                # Calculate probabilities and entropy for each position
+                probs = F.softmax(logits, dim=-1)
+                # Shape: [batch_size, seq_len, vocab_size] -> [batch_size, seq_len]
+                entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1)
+                
+                # Process each batch
+                batch_size, seq_len = entropy.shape
+                
+                # Get output file path
+                output_file = os.environ.get("prompt_entropy_output_file", "prompt_entropy_percentiles.jsonl")
+                os.environ["record_prompt_entropy"] = "False"
+                
+                # Process each batch separately
+                for batch_idx in range(batch_size):
+                    batch_entropy = entropy[batch_idx]  # Shape: [seq_len]
+                    
+                    # Sort entropy values from high to low
+                    sorted_entropy, _ = torch.sort(batch_entropy, descending=True)
+                    
+                    # Calculate percentiles (0%, 10%, 20%, ..., 90%, 100%)
+                    percentiles = {}
+                    for p in range(0, 101, 10):  # 0, 10, 20, ..., 90, 100
+                        if p == 100:
+                            # For 100%, take the last (lowest) value
+                            percentile_idx = seq_len - 1
+                        else:
+                            # For other percentiles, calculate the index
+                            percentile_idx = int(p / 100.0 * (seq_len - 1))
+                        
+                        percentiles[f"{p}%"] = sorted_entropy[percentile_idx].item()
+                    
+                    # Get input tokens for reference
+                    input_tokens = input_ids[batch_idx].tolist()
+                    
+                    # Prepare record
+                    record = {
+                        "batch_idx": batch_idx,
+                        "seq_len": seq_len,
+                        "entropy_percentiles": percentiles,
+                        "input_tokens": input_tokens,
+                        "input_text": self._safe_decode_sequence(input_tokens),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    
+                    # Write to file
+                    with open(output_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        
+        except Exception as e:
+            # Log error but don't interrupt the forward pass
+            print(f"Error in prompt entropy percentiles analysis: {e}")
+    
     def _safe_decode_token(self, token_id):
         """Safely decode a token ID to text, handling potential errors"""
         try:
@@ -1106,6 +1169,17 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         except Exception as e:
             return f"<decode_error_{token_id}>"
     
+    def _safe_decode_sequence(self, token_ids):
+        """Safely decode a sequence of token IDs to text"""
+        try:
+            # Try to get tokenizer from the model
+            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
+            # Decode the sequence
+            decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
+            return decoded
+        except Exception as e:
+            return f"<decode_error: {e}>"
+
     def reset_entropy_detection(self):
         """Reset entropy detection state for new generation"""
         self.high_entropy_detected = False
