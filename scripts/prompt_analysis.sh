@@ -7,7 +7,7 @@ set -o pipefail  # 管道命令中任何一个失败都会导致整个管道失�
 # export HF_ENDPOINT=https://hf-mirror.com ## if you have no vpn
 export HF_HOME=~/.cache/huggingface  ## default huggingface cache directory
 
-export model_path=/root/autodl-tmp/TNOT/models/Qwen2.5-7B
+export model_path=/hpc2hdd/home/hlin199/mujian/models/Qwen2.5-7B
 # export model_path=Qwen/Qwen2.5-7B ## or your local path to Qwen2.5-7B
 
 # 创建错误日志文件
@@ -28,8 +28,9 @@ trap 'handle_error $LINENO' ERR
 
 echo "Starting TNOT evaluation with error logging..."
 
-python SLOT/gpqa_evaluator.py \
+python -m SLOT/gpqa_evaluator \
     --model_path $model_path \
+    --split train \
     --times 0 \
     --lr 0.1 \
     --entropy_output_file "my_analysis.jsonl" \

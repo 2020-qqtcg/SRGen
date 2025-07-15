@@ -142,7 +142,6 @@ class BaseEvaluator:
                 print(f"--- Sample {i+1} use_entropy_control end---")
             else:
                 os.environ["prompt_only"] = "True"
-                os.environ["record_prompt_entropy"] = "True"
                 outputs = self.model.generate(
                     **inputs,
                     **generation_params,

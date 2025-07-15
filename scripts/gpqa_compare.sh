@@ -28,16 +28,14 @@ trap 'handle_error $LINENO' ERR
 
 echo "Starting TNOT evaluation with error logging..."
 
-python SLOT/gpqa_evaluator.py \
+python -m SLOT.gpqa_evaluator \
     --model_path $model_path \
-    --times 1 \
-    --lr 0.1 \
-    --entropy_output_file "my_analysis.jsonl" \
-    --entropy_threshold 2.0 \
-    --entropy_weight 0.05 \
+    --times 3 \
+    --lr 0.01 \
+    --entropy_threshold -1 \
+    --entropy_weight 0.25 \
     --use_entropy_control \
     --max_retries 10 \
-    --eval_samples 40 \
     2>&1 | tee -a "$ERROR_LOG"
 
 echo "=== TNOT Script Execution Completed Successfully at $(date) ===" >> "$ERROR_LOG"

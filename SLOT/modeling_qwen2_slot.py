@@ -783,6 +783,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         # Add high entropy detection metadata
         self.high_entropy_detected = False
         self.high_entropy_position = None
+        # Initialize entropy threshold as None, will be calculated dynamically
+        self.entropy_threshold = None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -881,6 +883,38 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         # Store original hidden states for entropy comparison
         original_hidden_states = hidden_states.clone()
 
+        # Dynamically calculate entropy threshold if not already set
+        if self.delta is None and self.entropy_threshold is None:
+            # Check if user manually set entropy_threshold in environment
+            env_threshold = float(os.environ.get("entropy_threshold", "-1"))
+            if env_threshold >= 0.0:
+                # Use environment variable value
+                self.entropy_threshold = env_threshold
+                print(f"Using manually set entropy threshold: {self.entropy_threshold:.4f}")
+            else:
+                # Calculate dynamically using 40% position
+                # Calculate entropy for current input and use 40% position as threshold
+                with torch.no_grad():
+                    temp_logits = self.lm_head(hidden_states)
+                    temp_probs = F.softmax(temp_logits, dim=-1)
+                    temp_entropy = -torch.sum(temp_probs * torch.log(temp_probs + 1e-10), dim=-1)
+                    
+                    # Get entropy for the first batch (assuming single batch for threshold calculation)
+                    batch_entropy = temp_entropy[0]  # Shape: [seq_len]
+                    
+                    # Sort entropy values from high to low
+                    sorted_entropy, _ = torch.sort(batch_entropy, descending=True)
+                    
+                    # Calculate 40% position index
+                    seq_len = sorted_entropy.shape[0]
+                    percentile_40_idx = int(0.4 * (seq_len - 1))
+                    
+                    # Set threshold to 40% position value
+                    self.entropy_threshold = sorted_entropy[percentile_40_idx].item()
+                    
+                    # Print the calculated threshold for debugging
+                    print(f"Dynamically calculated entropy threshold (40% position): {self.entropy_threshold:.4f}")
+            
         ###### SLOT begin here
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
         stage = "prompt" if prompt_only else "generation"
@@ -967,7 +1001,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         # Add entropy-based early stopping logic
         entropy_control_enabled = os.environ.get("entropy_control", "False") == "True"
         if entropy_control_enabled and logits.shape[1] > 0 and stage == "generation":  # Only during generation (not training)
-            entropy_threshold = float(os.environ.get("entropy_threshold", "5.0"))
+            # Use self.entropy_threshold if available, otherwise use environment variable
+            entropy_threshold = self.entropy_threshold if self.entropy_threshold is not None else float(os.environ.get("entropy_threshold", "5.0"))
             
             # Calculate entropy for the last token position
             last_logits = logits[:, -1, :]  # Shape: [batch_size, vocab_size]
@@ -1184,6 +1219,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         """Reset entropy detection state for new generation"""
         self.high_entropy_detected = False
         self.high_entropy_position = None
+
+    def reset_model_parameters(self):
+        self.delta = None
+        self.entropy_threshold = None
 
 
 @add_start_docstrings(
