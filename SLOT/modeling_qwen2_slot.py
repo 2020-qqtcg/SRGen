@@ -907,10 +907,11 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     
                     # Calculate 40% position index
                     seq_len = sorted_entropy.shape[0]
-                    percentile_40_idx = int(0.4 * (seq_len - 1))
+                    percentile = float(os.environ.get("percentile", "0.4"))
+                    percentile_idx = int(percentile * (seq_len - 1))
                     
                     # Set threshold to 40% position value
-                    self.entropy_threshold = sorted_entropy[percentile_40_idx].item()
+                    self.entropy_threshold = sorted_entropy[percentile_idx].item()
                     
                     # Print the calculated threshold for debugging
                     print(f"Dynamically calculated entropy threshold (40% position): {self.entropy_threshold:.4f}")
