@@ -121,8 +121,8 @@ class BaseEvaluator:
         total_retries = 0
         
         for i, qa in enumerate(eval_QAs):
-            if self.model.delta is not None:
-                self.model.delta = None
+            self.model.reset_entropy_detection()
+            self.model.reset_model_parameters()
                 
             if (i + 1) % 10 == 0:
                 print(f"Evaluated {i+1}/{total} samples")
