@@ -239,10 +239,11 @@ class BaseEvaluator:
     @staticmethod
     def setup_logging(args, benchmark_name: str = "base"):
         """Setup logging directory and file"""
-        log_dir = "logs"
+        log_dir = f"logs/{benchmark_name    }"
         os.makedirs(log_dir, exist_ok=True)
+        model_name = args.model_path.split("/")[-1]
         entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
-        log_file = os.path.join(log_dir, f"log_{benchmark_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
+        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
         
         with open(log_file, "w") as f:
             f.write(f"Model Path: {args.model_path}\n")
