@@ -18,8 +18,9 @@ class BaseEvaluator:
         self.model = Qwen2ForCausalLM.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
-            _attn_implementation="sdpa"
-        ).to("cuda")
+            _attn_implementation="flash_attention_2",
+            device_map="auto"
+        )
         
     def load_dataset(self, split, eval_samples=None):
         """Abstract method to load dataset - must be implemented by subclasses"""
