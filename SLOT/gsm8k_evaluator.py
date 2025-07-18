@@ -65,7 +65,7 @@ def main():
     
     # Set generation parameters
     generation_params = {
-        "do_sample": False,
+        "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
         "max_new_tokens": 512
     }

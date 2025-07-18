@@ -54,6 +54,7 @@ class BaseEvaluator:
             self.model.reset_entropy_detection()
             os.environ["prompt_only"] = "True"  
             
+            print("Generation parameters at retry:", generation_params)
             outputs = self.model.generate(
                 **current_inputs,
                 **generation_params,
@@ -244,8 +245,10 @@ class BaseEvaluator:
         log_dir = f"logs/{benchmark_name    }"
         os.makedirs(log_dir, exist_ok=True)
         model_name = args.model_path.split("/")[-1]
+        max_retries = args.max_retries
         entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
-        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}.txt")
+        percentile = f"_precentile_{args.percentile}" if args.percentile else ""
+        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{percentile}_reatries_{max_retries}.txt")
         
         with open(log_file, "w") as f:
             f.write(f"Model Path: {args.model_path}\n")

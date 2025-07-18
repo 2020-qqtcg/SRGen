@@ -154,3 +154,5 @@ comparison_*/
 entropy_averages.json
 analyze_entropy.py
 temp*
+
+logs*

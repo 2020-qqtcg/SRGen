@@ -914,12 +914,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     self.entropy_threshold = sorted_entropy[percentile_idx].item()
                     
                     # Print the calculated threshold for debugging
-                    print(f"Dynamically calculated entropy threshold (40% position): {self.entropy_threshold:.4f}")
+                    print(f"Dynamically calculated entropy threshold ({percentile} position): {self.entropy_threshold:.4f}")
             
         ###### SLOT begin here
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
         stage = "prompt" if prompt_only else "generation"
         if prompt_only:
+            if self.delta is not None:
+                hidden_states = hidden_states + self.delta
+                
             times = int(os.environ.get("times", 1))
             lr = float(os.environ.get("lr", 0.1))
             with torch.enable_grad():
@@ -927,34 +930,39 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 delta_high = nn.Parameter(0.0 * torch.randn([1,1, hidden_states.shape[-1]]).to(hidden_states))
                 delta_normal = nn.Parameter(0.0 * torch.randn([1,1, hidden_states.shape[-1]]).to(hidden_states))
                 
-                # Optimize delta_high with joint loss (CE + entropy)
-                optimizer_high = torch.optim.AdamW([delta_high], lr=lr, weight_decay=1e-8, eps=1e-5)
-                for _ in range(times):
-                    optimizer_high.zero_grad()
-                    transformed_hidden = hidden_states + delta_high
-                    logits = self.lm_head(transformed_hidden)
-                    loss_fct = nn.CrossEntropyLoss()
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    
-                    # Use prompt as labels
-                    shift_labels = input_ids[:, 1:].contiguous()
-                    ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-                    
-                    # Add entropy loss for the last position
-                    last_logits = logits[:, -1, :]  # Shape: [batch_size, vocab_size]
-                    last_probs = F.softmax(last_logits, dim=-1)
-                    entropy = -torch.sum(last_probs * torch.log(last_probs + 1e-10), dim=-1)  # Shape: [batch_size]
-                    entropy_loss = torch.mean(entropy)  # Average over batch
-                    
-                    # Combine losses using weighted average
-                    entropy_weight = float(os.environ.get("entropy_weight", "0.1"))
-                    loss = (1 - entropy_weight) * ce_loss + entropy_weight * entropy_loss
-                    
-                    loss.backward()
-                    optimizer_high.step()
+                if self.delta is not None:
+                    # Optimize delta_high with joint loss (CE + entropy)
+                    optimizer_high = torch.optim.AdamW([delta_high], lr=lr, weight_decay=1e-8, eps=1e-5)
+                    for _ in range(times):
+                        optimizer_high.zero_grad()
+                        transformed_hidden = hidden_states + delta_high
+
+                        logits = self.lm_head(transformed_hidden)
+                        loss_fct = nn.CrossEntropyLoss()
+                        shift_logits = logits[..., :-1, :].contiguous()
+                        
+                        # Use prompt as labels
+                        shift_labels = input_ids[:, 1:].contiguous()
+                        ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                        
+                        # Add entropy loss for the last position
+                        last_logits = logits[:, -1, :]  # Shape: [batch_size, vocab_size]
+                        last_probs = F.softmax(last_logits, dim=-1)
+                        entropy = -torch.sum(last_probs * torch.log(last_probs + 1e-10), dim=-1)  # Shape: [batch_size]
+                        entropy_loss = torch.mean(entropy)  # Average over batch
+                        
+                        # Combine losses using weighted average
+                        entropy_weight = float(os.environ.get("entropy_weight", "0.1"))
+                        loss = (1 - entropy_weight) * ce_loss + entropy_weight * entropy_loss
+                        
+                        loss.backward()
+                        optimizer_high.step()
+
+                    # Apply delta_high for current prompt processing
+                    hidden_states = hidden_states + delta_high
                 
                 # Optimize delta_normal with only cross-entropy loss
-                if self.delta is None:
+                else:
                     optimizer_normal = torch.optim.AdamW([delta_normal], lr=lr, weight_decay=1e-8, eps=1e-5)
                     for _ in range(times):
                         optimizer_normal.zero_grad()
@@ -974,10 +982,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                         optimizer_normal.step()
                     
                     # Store delta_normal for subsequent generation stages
-                    self.delta = delta_normal
-                
-                # Apply delta_high for current prompt processing
-                hidden_states = hidden_states + delta_high
+                    self.delta = delta_normal.detach().clone()
+
+                    hidden_states = hidden_states + self.delta
             
                 os.environ["prompt_only"] = "False"
                 torch.cuda.empty_cache()
@@ -1030,11 +1037,16 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 
                 # Create new logits with EOS token as the highest probability
                 modified_logits = logits.clone()
+
+                dtype = modified_logits.dtype
+                large_value = 1e4
+                print(f"large_value: {large_value:.4f} for dtype {dtype}")
+
                 for batch_idx in range(logits.shape[0]):
                     if high_entropy_mask[batch_idx]:
                         # Set EOS token to very high logit value
-                        modified_logits[batch_idx, -1, :] = -float('inf')
-                        modified_logits[batch_idx, -1, eos_token_id] = float('inf')
+                        modified_logits[batch_idx, -1, :] = -large_value
+                        modified_logits[batch_idx, -1, eos_token_id] = large_value
                 
                 logits = modified_logits
                 

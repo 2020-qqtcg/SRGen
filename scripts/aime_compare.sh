@@ -28,93 +28,59 @@ trap 'handle_error $LINENO' ERR
 
 echo "Starting TNOT evaluation with error logging..."
 
-#base
-python -m SLOT.gsm8k_evaluator \
+python -m SLOT.aime_evaluator \
     --model_path $model_path \
-    --split test \
-    --times 1 \
+    --split train \
+    --times 0 \
     --lr 0.1 \
-    --entropy_threshold 1000 \
+    --entropy_threshold 10000 \
     --entropy_weight 0.0 \
     --use_entropy_control \
     --max_retries 10 \
-    --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-
-python -m SLOT.gsm8k_evaluator \
+python -m SLOT.aime_evaluator \
     --model_path $model_path \
-    --split test \
+    --split train \
+    --times 1 \
+    --lr 0.1 \
+    --entropy_threshold 10000 \
+    --entropy_weight 0.0 \
+    --max_retries 10 \
+    2>&1 | tee -a "$ERROR_LOG"
+
+python -m SLOT.aime_evaluator \
+    --model_path $model_path \
+    --split train \
     --times 3 \
     --lr 0.1 \
     --entropy_threshold 1000 \
     --entropy_weight 0.0 \
     --use_entropy_control \
     --max_retries 10 \
-    --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-python -m SLOT.gsm8k_evaluator \
+python -m SLOT.aime_evaluator \
     --model_path $model_path \
-    --split test \
-    --times 5 \
-    --lr 0.1 \
-    --entropy_threshold 1000 \
-    --entropy_weight 0.0 \
-    --use_entropy_control \
-    --max_retries 10 \
-    --do_sample \
-    2>&1 | tee -a "$ERROR_LOG"
-
-# new
-python -m SLOT.gsm8k_evaluator \
-    --model_path $model_path \
-    --split test \
-    --times 5 \
-    --lr 0.1 \
-    --entropy_threshold 1.8 \
-    --entropy_weight 0.25 \
-    --use_entropy_control \
-    --max_retries 10 \
-    --do_sample \
-    2>&1 | tee -a "$ERROR_LOG"
-
-python -m SLOT.gsm8k_evaluator \
-    --model_path $model_path \
-    --split test \
-    --times 5 \
-    --lr 0.1 \
-    --entropy_threshold 2.4 \
-    --entropy_weight 0.25 \
-    --use_entropy_control \
-    --max_retries 10 \
-    --do_sample \
-    2>&1 | tee -a "$ERROR_LOG"
-
-python -m SLOT.gsm8k_evaluator \
-    --model_path $model_path \
-    --split test \
-    --times 3 \
-    --lr 0.1 \
-    --entropy_threshold 1.8 \
-    --entropy_weight 0.25 \
-    --use_entropy_control \
-    --max_retries 10 \
-    --do_sample \
-    2>&1 | tee -a "$ERROR_LOG"
-
-python -m SLOT.gsm8k_evaluator \
-    --model_path $model_path \
-    --split test \
+    --split train \
     --times 1 \
     --lr 0.1 \
     --entropy_threshold 1.8 \
     --entropy_weight 0.25 \
     --use_entropy_control \
     --max_retries 10 \
-    --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
+python -m SLOT.aime_evaluator \
+    --model_path $model_path \
+    --split train \
+    --times 3 \
+    --lr 0.1 \
+    --entropy_threshold 1.8 \
+    --entropy_weight 0.25 \
+    --use_entropy_control \
+    --max_retries 10 \
+    2>&1 | tee -a "$ERROR_LOG"
 
 echo "=== TNOT Script Execution Completed Successfully at $(date) ===" >> "$ERROR_LOG"
 echo "All tasks completed successfully!"
