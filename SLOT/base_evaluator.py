@@ -216,7 +216,9 @@ class BaseEvaluator:
         parser.add_argument("--record_entropy", action="store_true", help="Whether to record entropy analysis")
         parser.add_argument("--entropy_output_file", type=str, default="my_analysis.jsonl", help="Output file for entropy analysis")
         parser.add_argument("--entropy_weight", type=float, default=0.1, help="Weight for entropy loss")
-        parser.add_argument("--percentile", type=float, default=0.4, help="Percentile for entropy threshold")
+        parser.add_argument("--adaptive_entropy", action="store_true", help="Enable adaptive entropy threshold")
+        parser.add_argument("--adaptive_entropy_N", type=int, default=20, help="Number of samples for adaptive entropy threshold")
+        parser.add_argument("--adaptive_entropy_K", type=int, default=2, help="K for adaptive entropy threshold")
         return parser.parse_args()
 
     @staticmethod
@@ -229,7 +231,9 @@ class BaseEvaluator:
         os.environ["tokenizer_path"] = args.model_path
         os.environ["entropy_threshold"] = str(args.entropy_threshold)
         os.environ["entropy_weight"] = str(args.entropy_weight)
-        os.environ["percentile"] = str(args.percentile)
+        os.environ["adaptive_entropy"] = "True" if args.adaptive_entropy else "False"
+        os.environ["adaptive_entropy_N"] = str(args.adaptive_entropy_N)
+        os.environ["adaptive_entropy_K"] = str(args.adaptive_entropy_K)
         
         if args.use_entropy_control:
             os.environ["use_entropy_control"] = "True"
@@ -247,8 +251,8 @@ class BaseEvaluator:
         model_name = args.model_path.split("/")[-1]
         max_retries = args.max_retries
         entropy_suffix = f"_entropy_{args.entropy_threshold}_weight_{args.entropy_weight}" if args.use_entropy_control else ""
-        percentile = f"_precentile_{args.percentile}" if args.percentile else ""
-        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{percentile}_reatries_{max_retries}.txt")
+        adaptive_entropy_suffix = f"_N_{args.adaptive_entropy_N}_K_{args.adaptive_entropy_K}" if args.adaptive_entropy else ""
+        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{adaptive_entropy_suffix}_reatries_{max_retries}.txt")
         
         with open(log_file, "w") as f:
             f.write(f"Model Path: {args.model_path}\n")
