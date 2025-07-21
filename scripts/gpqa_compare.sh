@@ -37,7 +37,9 @@ python -m SLOT.gpqa_evaluator \
     --entropy_weight 0.25 \
     --use_entropy_control \
     --max_retries 10 \
-    --do_sample \
+    --adaptive_entropy \
+    --adaptive_entropy_N 20 \
+    --adaptive_entropy_K 2 \
     2>&1 | tee -a "$ERROR_LOG"
 
 echo "=== TNOT Script Execution Completed Successfully at $(date) ===" >> "$ERROR_LOG"
