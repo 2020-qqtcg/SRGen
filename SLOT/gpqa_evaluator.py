@@ -108,8 +108,7 @@ D) {D}
     
     def get_system_prompt(self):
         """Get system prompt for GPQA"""
-        return """You are a helpful assistant. A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the user with the answer.\
-Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering."""
+        return """Answer the following multiple choice question. Think step by step before answering and show your reasoning path. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD."""
 
     def setup_logging(self, args):
         return super().setup_logging(args, benchmark_name="gpqa")
@@ -129,7 +128,7 @@ def main():
     generation_params = {
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": 4096
+        "max_new_tokens": 2048
     }
 
     print("Generation parameters:", generation_params)

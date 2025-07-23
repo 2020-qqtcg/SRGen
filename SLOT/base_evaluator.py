@@ -54,7 +54,6 @@ class BaseEvaluator:
             self.model.reset_entropy_detection()
             os.environ["prompt_only"] = "True"  
             
-            print("Generation parameters at retry:", generation_params)
             outputs = self.model.generate(
                 **current_inputs,
                 **generation_params,
@@ -218,7 +217,7 @@ class BaseEvaluator:
         parser.add_argument("--entropy_weight", type=float, default=0.1, help="Weight for entropy loss")
         parser.add_argument("--adaptive_entropy", action="store_true", help="Enable adaptive entropy threshold")
         parser.add_argument("--adaptive_entropy_N", type=int, default=20, help="Number of samples for adaptive entropy threshold")
-        parser.add_argument("--adaptive_entropy_K", type=int, default=2, help="K for adaptive entropy threshold")
+        parser.add_argument("--adaptive_entropy_K", type=float, default=2, help="K for adaptive entropy threshold")
         return parser.parse_args()
 
     @staticmethod

@@ -911,6 +911,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                         
                         # Use prompt as labels
                         shift_labels = input_ids[:, 1:].contiguous()
+                        shift_labels = shift_labels.to(shift_logits.device)
+                        
                         ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
                         
                         # Add entropy loss for the last position
@@ -941,6 +943,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                         
                         # Use prompt as labels
                         shift_labels = input_ids[:, 1:].contiguous()
+                        shift_labels = shift_labels.to(shift_logits.device)
+
                         ce_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
                         
                         # Only use cross-entropy loss for delta_normal
@@ -960,6 +964,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             if self.delta is not None:
                 # Apply delta_normal (cross-entropy optimized) for generation
                 hidden_states = hidden_states + self.delta
+        
         ###### SLOT end here
 
         # Calculate entropy and record analysis if enabled
@@ -987,7 +992,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
             # Dynamic entropy threshold
             if os.environ.get("adaptive_entropy", "False") == "True":
                 adaptive_entropy_N = int(os.environ.get("adaptive_entropy_N", "20"))
-                adaptive_entropy_K = int(os.environ.get("adaptive_entropy_K", "2"))
+                adaptive_entropy_K = float(os.environ.get("adaptive_entropy_K", "2"))
                 current_len = len(self.entropy_history) + 1
 
                 # Only calculate dynamic entropy threshold if we have enough history
@@ -999,6 +1004,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
 
                     entropy_threshold = mean_history + adaptive_entropy_K * std_history
                     entropy_threshold = entropy_threshold.item()
+                    entropy_threshold = max(entropy_threshold, 1.8)  # Ensure non-negative threshold
+
 
                 self.entropy_history.append(entropy.item())
                     
@@ -1041,6 +1048,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                     for batch_idx in range(entropy.shape[0]):
                         if high_entropy_mask[batch_idx]:
                             print(f"High entropy detected: {entropy[batch_idx].item():.4f} > {entropy_threshold} at position {current_length}")
+            
 
         loss = None
         if labels is not None:
