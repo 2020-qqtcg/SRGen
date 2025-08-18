@@ -28,7 +28,7 @@ trap 'handle_error $LINENO' ERR
 
 echo "Starting TNOT evaluation with error logging..."
 
-python -m SLOT/gpqa_evaluator \
+python -m TNOT/gpqa_evaluator \
     --model_path $model_path \
     --split train \
     --times 0 \

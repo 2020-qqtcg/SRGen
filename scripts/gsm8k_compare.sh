@@ -29,7 +29,7 @@ trap 'handle_error $LINENO' ERR
 echo "Starting TNOT evaluation with error logging..."
 
 #base
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 1 \
@@ -42,7 +42,7 @@ python -m SLOT.gsm8k_evaluator \
     2>&1 | tee -a "$ERROR_LOG"
 
 
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 3 \
@@ -54,7 +54,7 @@ python -m SLOT.gsm8k_evaluator \
     --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 5 \
@@ -67,7 +67,7 @@ python -m SLOT.gsm8k_evaluator \
     2>&1 | tee -a "$ERROR_LOG"
 
 # new
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 5 \
@@ -79,7 +79,7 @@ python -m SLOT.gsm8k_evaluator \
     --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 5 \
@@ -91,7 +91,7 @@ python -m SLOT.gsm8k_evaluator \
     --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 3 \
@@ -103,7 +103,7 @@ python -m SLOT.gsm8k_evaluator \
     --do_sample \
     2>&1 | tee -a "$ERROR_LOG"
 
-python -m SLOT.gsm8k_evaluator \
+python -m TNOT.gsm8k_evaluator \
     --model_path $model_path \
     --split test \
     --times 1 \
