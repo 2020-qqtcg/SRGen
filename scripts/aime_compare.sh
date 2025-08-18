@@ -8,7 +8,6 @@ set -o pipefail  # 管道命令中任何一个失败都会导致整个管道失�
 export HF_HOME=~/.cache/huggingface  ## default huggingface cache directory
 export model_path=/hpc2hdd/home/hlin199/mujian/models/Qwen2.5-7B-Instruct
 # export model_path=Qwen/Qwen2.5-7B ## or your local path to Qwen2.5-7B
-
 # 创建错误日志文件
 # ERROR_LOG="./error2.log"
 # echo "=== TNOT Script Execution Started at $(date) ===" >> "$ERROR_LOG"

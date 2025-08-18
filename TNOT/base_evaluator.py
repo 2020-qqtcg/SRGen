@@ -6,6 +6,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from TNOT.model.modeling_qwen2_tnot import Qwen2ForCausalLM
 from TNOT.model.modeling_llama3_tnot import LlamaForCausalLM
+from TNOT.model.modeling_phi4_tnot import PhiForCausalLM
 
 class BaseEvaluator:
     def __init__(self):
@@ -39,8 +40,16 @@ class BaseEvaluator:
                 _attn_implementation="flash_attention_2",
                 device_map=device
             )
+        elif model_type in ["phi", "phi3"]:
+            print("Loading with custom Phi-4 implementation...")
+            self.model = PhiForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=torch.bfloat16,
+                _attn_implementation="flash_attention_2",
+                device_map=device
+            )
         else:
-            print(f"Warning: Model type '{model_type}' not supported with custom slot implementation.")
+            print(f"Warning: Model type '{model_type}' not supported with custom TNOT implementation.")
             print("Falling back to standard AutoModelForCausalLM...")
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,

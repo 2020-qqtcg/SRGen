@@ -886,7 +886,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         # Store original hidden states for entropy comparison
         original_hidden_states = hidden_states.clone()
             
-        ###### SLOT begin here
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
         stage = "prompt" if prompt_only else "generation"
         if prompt_only:
@@ -981,7 +980,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
                 # hidden_states = hidden_states + self.delta
                 pass
         
-        ###### SLOT end here
 
         # Calculate entropy and record analysis if enabled
         if os.environ.get("record_entropy", "False") == "True" and self.delta is not None:
