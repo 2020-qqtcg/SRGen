@@ -1,4 +1,4 @@
--r SLOT/requirements.txt
+-r TNOT/requirements.txt
 sympy 
 timeout-decorator
 latex2sympy2_extended
