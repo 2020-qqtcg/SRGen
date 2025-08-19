@@ -3,6 +3,10 @@ import re
 import random
 import argparse
 import torch
+import torch.multiprocessing as mp
+import json
+import time
+from typing import List, Dict, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from TNOT.model.modeling_qwen2_tnot import Qwen2ForCausalLM
 from TNOT.model.modeling_llama3_tnot import LlamaForCausalLM
@@ -13,9 +17,66 @@ class BaseEvaluator:
         self.model = None
         self.tokenizer = None
         
+    @staticmethod
+    def detect_available_gpus() -> List[int]:
+        """Detect available GPUs and return their indices"""
+        if not torch.cuda.is_available():
+            print("CUDA is not available, using CPU")
+            return []
+        
+        gpu_count = torch.cuda.device_count()
+        available_gpus = []
+        
+        for i in range(gpu_count):
+            try:
+                # Test if GPU is accessible
+                torch.cuda.set_device(i)
+                torch.cuda.empty_cache()
+                available_gpus.append(i)
+                print(f"GPU {i}: {torch.cuda.get_device_name(i)} - Available")
+            except Exception as e:
+                print(f"GPU {i}: Not available - {str(e)}")
+                
+        print(f"Found {len(available_gpus)} available GPUs: {available_gpus}")
+        return available_gpus
+    
+    @staticmethod
+    def partition_data(data: List[Dict], num_partitions: int) -> List[List[Dict]]:
+        """Partition data into roughly equal chunks for parallel processing"""
+        if num_partitions <= 1:
+            return [data]
+            
+        chunk_size = len(data) // num_partitions
+        remainder = len(data) % num_partitions
+        
+        partitions = []
+        start_idx = 0
+        
+        for i in range(num_partitions):
+            # Distribute remainder among first few partitions
+            current_chunk_size = chunk_size + (1 if i < remainder else 0)
+            end_idx = start_idx + current_chunk_size
+            
+            # Add global indices to track original positions
+            partition_data = []
+            for j, item in enumerate(data[start_idx:end_idx]):
+                item_with_idx = item.copy()
+                item_with_idx['global_idx'] = start_idx + j
+                partition_data.append(item_with_idx)
+                
+            partitions.append(partition_data)
+            start_idx = end_idx
+            
+        # Print partition info
+        for i, partition in enumerate(partitions):
+            print(f"Partition {i}: {len(partition)} samples (indices {partition[0]['global_idx']}-{partition[-1]['global_idx']})")
+            
+        return partitions
+        
     def load_model(self, model_path, device="cuda:0"):
         """Load model and tokenizer with automatic model type detection"""
         print(f"Loading model from: {model_path}")
+        self.model_path = model_path  # Store for parallel processes
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Auto-detect model type based on config
@@ -234,6 +295,266 @@ class BaseEvaluator:
             f.write(f"Average Retries per Sample: {avg_retries:.2f}\n")
         
         return accuracy, format_accuracy
+    
+    def evaluate_partition(self, gpu_id: int, partition_data: List[Dict], generation_params: Dict, 
+                          seed: int, log_file: str, temp_results_file: str) -> Dict[str, Any]:
+        """Evaluate a partition of data on a specific GPU"""
+        try:
+            # Set device for this process
+            device = f"cuda:{gpu_id}"
+            torch.cuda.set_device(gpu_id)
+            
+            print(f"Process {gpu_id}: Starting evaluation on {device} with {len(partition_data)} samples")
+            
+            # Load model on this GPU
+            self.load_model(os.environ.get("model_path"), device)
+            self.model.eval()
+            random.seed(seed + gpu_id)  # Different seed for each process
+            
+            correct = 0
+            format_correct = 0
+            total = len(partition_data)
+            total_retries = 0
+            results = []
+            
+            for i, qa in enumerate(partition_data):
+                self.model.reset_entropy_detection()
+                self.model.reset_model_parameters()
+                
+                global_idx = qa['global_idx']
+                
+                if (i + 1) % 5 == 0:
+                    print(f"GPU {gpu_id}: Evaluated {i+1}/{total} samples")
+                    
+                prompt = qa['Q']
+                prompt_text = self.tokenizer.apply_chat_template([
+                    {"role": "system", "content": self.get_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ], tokenize=False, add_generation_prompt=True)
+                
+                inputs = self.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to(self.model.device)
+                
+                use_entropy_control = os.environ.get("use_entropy_control", "False") == "True"
+                if use_entropy_control:
+                    max_retries = int(os.environ.get("max_retries", "5"))
+                    completion, retry_count = self.generate_with_entropy_control(inputs, generation_params, max_retries)
+                else:
+                    os.environ["prompt_only"] = "True"
+                    outputs = self.model.generate(
+                        **inputs,
+                        **generation_params,
+                    )
+                    completion = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+                    retry_count = 0
+                
+                format_score = self.reward_format(qa, completion)
+                correct_score = self.reward_correct(qa, completion)
+                
+                is_format_correct = format_score > 0
+                is_answer_correct = correct_score > 0
+                
+                if is_format_correct:
+                    format_correct += 1
+                if is_answer_correct:
+                    correct += 1
+                
+                total_retries += retry_count
+                
+                # Store result for later sorting and logging
+                result = {
+                    'global_idx': global_idx,
+                    'gpu_id': gpu_id,
+                    'question': qa['Q'],
+                    'model_response': completion,
+                    'correct_answer': qa['A'],
+                    'is_format_correct': is_format_correct,
+                    'is_answer_correct': is_answer_correct,
+                    'retry_count': retry_count
+                }
+                results.append(result)
+                
+                print(f"GPU {gpu_id} - Sample {global_idx+1}: Format={is_format_correct}, Answer={is_answer_correct}, Retries={retry_count}")
+            
+            # Save temporary results
+            temp_result = {
+                'gpu_id': gpu_id,
+                'correct': correct,
+                'format_correct': format_correct,
+                'total': total,
+                'total_retries': total_retries,
+                'results': results
+            }
+            
+            with open(temp_results_file, 'w') as f:
+                json.dump(temp_result, f)
+                
+            print(f"GPU {gpu_id}: Completed evaluation. Accuracy: {correct/total:.4f}, Format: {format_correct/total:.4f}")
+            return temp_result
+            
+        except Exception as e:
+            print(f"Error in GPU {gpu_id}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'gpu_id': gpu_id,
+                'correct': 0,
+                'format_correct': 0,
+                'total': 0,
+                'total_retries': 0,
+                'results': [],
+                'error': str(e)
+            }
+    
+    def evaluate_model_parallel(self, eval_samples=None, split="test", generation_params=None, 
+                               seed=42, log_file="evaluation_log.txt", version=None, 
+                               max_parallel_gpus=None) -> Tuple[float, float]:
+        """Parallel evaluation across multiple GPUs"""
+        print("Starting parallel model evaluation...")
+        
+        # Detect available GPUs
+        available_gpus = self.detect_available_gpus()
+        
+        if not available_gpus:
+            print("No GPUs available, falling back to single-threaded CPU evaluation")
+            return self.evaluate_model(eval_samples, split, generation_params, seed, log_file, version)
+        
+        # Determine number of parallel processes
+        if max_parallel_gpus is not None:
+            num_processes = min(max_parallel_gpus, len(available_gpus))
+            available_gpus = available_gpus[:num_processes]
+        else:
+            num_processes = len(available_gpus)
+            
+        print(f"Using {num_processes} GPUs for parallel evaluation: {available_gpus}")
+        
+        # Load dataset
+        eval_QAs = self.load_dataset(split, eval_samples, version=version)
+        print(f"Evaluating {len(eval_QAs)} samples across {num_processes} GPUs")
+        
+        # Partition data
+        partitions = self.partition_data(eval_QAs, num_processes)
+        
+        # Set up temporary files for results
+        temp_dir = "temp_parallel_results"
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_files = [os.path.join(temp_dir, f"gpu_{gpu_id}_results.json") for gpu_id in available_gpus]
+        
+        # Store model path for subprocesses
+        if hasattr(self, 'model_path'):
+            os.environ["model_path"] = self.model_path
+        else:
+            print("Warning: model_path not found, make sure to call load_model first")
+        
+        # Start parallel processes
+        print("Starting parallel evaluation processes...")
+        processes = []
+        
+        # Use multiprocessing to run evaluation on each GPU
+        mp.set_start_method('spawn', force=True)
+        
+        for i, gpu_id in enumerate(available_gpus):
+            args = (gpu_id, partitions[i], generation_params, seed, log_file, temp_files[i])
+            p = mp.Process(target=self._run_evaluation_process, args=args)
+            p.start()
+            processes.append(p)
+            
+        # Wait for all processes to complete
+        for p in processes:
+            p.join()
+            
+        # Collect and merge results
+        print("Collecting results from all GPUs...")
+        return self._collect_and_merge_results(temp_files, log_file, temp_dir)
+    
+    def _run_evaluation_process(self, gpu_id: int, partition_data: List[Dict], 
+                               generation_params: Dict, seed: int, log_file: str, temp_results_file: str):
+        """Wrapper method to run evaluation in a separate process"""
+        try:
+            # Create a new evaluator instance for this process
+            evaluator = self.__class__()
+            result = evaluator.evaluate_partition(gpu_id, partition_data, generation_params, 
+                                                 seed, log_file, temp_results_file)
+        except Exception as e:
+            print(f"Process error on GPU {gpu_id}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _collect_and_merge_results(self, temp_files: List[str], log_file: str, temp_dir: str) -> Tuple[float, float]:
+        """Collect results from all GPUs and write ordered logs"""
+        all_results = []
+        total_correct = 0
+        total_format_correct = 0
+        total_samples = 0
+        total_retries = 0
+        
+        # Load all temporary results
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                try:
+                    with open(temp_file, 'r') as f:
+                        result = json.load(f)
+                        
+                    if 'error' in result:
+                        print(f"GPU {result['gpu_id']} had error: {result['error']}")
+                        continue
+                        
+                    total_correct += result['correct']
+                    total_format_correct += result['format_correct']
+                    total_samples += result['total']
+                    total_retries += result['total_retries']
+                    
+                    all_results.extend(result['results'])
+                    
+                except Exception as e:
+                    print(f"Error loading result file {temp_file}: {str(e)}")
+            else:
+                print(f"Warning: Result file {temp_file} not found")
+        
+        # Sort results by global index to maintain order
+        all_results.sort(key=lambda x: x['global_idx'])
+        
+        # Write ordered log file
+        with open(log_file, "a") as f:
+            f.write(f"Number of evaluation samples: {total_samples}\n")
+            f.write(f"Parallel evaluation across {len(temp_files)} GPUs\n\n")
+            
+            for result in all_results:
+                f.write(f"Sample {result['global_idx']+1}:\n")
+                f.write(f"GPU: {result['gpu_id']}\n")
+                f.write(f"Question: {result['question']}\n")
+                f.write(f"Model Response: {result['model_response']}\n")
+                f.write(f"Correct Answer: {result['correct_answer']}\n")
+                f.write(f"Format Correct: {result['is_format_correct']}, Answer Correct: {result['is_answer_correct']}\n")
+                f.write(f"Retry Count: {result['retry_count']}\n\n")
+        
+        # Calculate final metrics
+        accuracy = total_correct / total_samples if total_samples > 0 else 0
+        format_accuracy = total_format_correct / total_samples if total_samples > 0 else 0
+        avg_retries = total_retries / total_samples if total_samples > 0 else 0
+        
+        print(f"\nParallel Evaluation Results (Samples: {total_samples}):")
+        print(f"Answer Accuracy: {accuracy:.4f}")
+        print(f"Format Accuracy: {format_accuracy:.4f}")
+        print(f"Total Retries: {total_retries}")
+        print(f"Average Retries per Sample: {avg_retries:.2f}")
+        
+        # Write summary to log
+        with open(log_file, "a") as f:
+            f.write(f"Parallel Evaluation Results (Samples: {total_samples}):\n")
+            f.write(f"Answer Accuracy: {accuracy:.4f}\n")
+            f.write(f"Format Accuracy: {format_accuracy:.4f}\n")
+            f.write(f"Total Retries: {total_retries}\n")
+            f.write(f"Average Retries per Sample: {avg_retries:.2f}\n")
+        
+        # Clean up temporary files
+        try:
+            import shutil
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up temporary directory: {temp_dir}")
+        except Exception as e:
+            print(f"Warning: Could not clean up temporary directory: {str(e)}")
+        
+        return accuracy, format_accuracy
 
     @staticmethod
     def setup_args():
@@ -258,6 +579,10 @@ class BaseEvaluator:
         parser.add_argument("--adaptive_entropy_N", type=int, default=20, help="Number of samples for adaptive entropy threshold")
         parser.add_argument("--adaptive_entropy_K", type=float, default=2, help="K for adaptive entropy threshold")
         parser.add_argument("--mask_special_tokens", action="store_true", help="Mask special tokens in the input")
+        
+        # Parallel evaluation arguments
+        parser.add_argument("--parallel", action="store_true", help="Enable parallel evaluation across multiple GPUs")
+        parser.add_argument("--max_parallel_gpus", type=int, default=None, help="Maximum number of GPUs to use for parallel evaluation")
 
         # Just for aime
         parser.add_argument("--version", default="2024", help="Version of AIME")
@@ -297,8 +622,9 @@ class BaseEvaluator:
         do_sample_suffix = f"_do_sample_temperature_{args.temperature}" if args.do_sample else ""
 
         mask_special_suffix = "" if args.mask_special_tokens else "_nomask"
+        parallel_suffix = "_parallel" if getattr(args, 'parallel', False) else ""
 
-        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{adaptive_entropy_suffix}_reatries_{max_retries}{do_sample_suffix}{mask_special_suffix}.txt")
+        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{adaptive_entropy_suffix}_reatries_{max_retries}{do_sample_suffix}{mask_special_suffix}{parallel_suffix}.txt")
         
         with open(log_file, "w") as f:
             f.write(f"Model Path: {args.model_path}\n")
@@ -314,6 +640,10 @@ class BaseEvaluator:
             f.write(f"Seed: {args.seed}\n")
             f.write(f"Use Entropy Control: {args.use_entropy_control}\n")
             f.write(f"Entropy Threshold: {args.entropy_threshold}\n")
-            f.write(f"Max Retries: {args.max_retries}\n\n")
+            f.write(f"Max Retries: {args.max_retries}\n")
+            f.write(f"Parallel Evaluation: {getattr(args, 'parallel', False)}\n")
+            if getattr(args, 'parallel', False):
+                f.write(f"Max Parallel GPUs: {getattr(args, 'max_parallel_gpus', 'All available')}\n")
+            f.write("\n")
         
         return log_file

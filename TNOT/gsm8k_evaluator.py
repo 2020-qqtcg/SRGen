@@ -161,14 +161,26 @@ def main():
         "masked_token_ids": masked_token_ids
     }
     
-    # Run evaluation
-    accuracy, format_accuracy = evaluator.evaluate_model(
-        eval_samples=args.eval_samples,
-        split=args.split,
-        generation_params=generation_params,
-        seed=args.seed,
-        log_file=log_file
-    )
+    # Run evaluation (parallel or sequential)
+    if args.parallel:
+        print("Running parallel evaluation across multiple GPUs...")
+        accuracy, format_accuracy = evaluator.evaluate_model_parallel(
+            eval_samples=args.eval_samples,
+            split=args.split,
+            generation_params=generation_params,
+            seed=args.seed,
+            log_file=log_file,
+            max_parallel_gpus=args.max_parallel_gpus
+        )
+    else:
+        print("Running sequential evaluation...")
+        accuracy, format_accuracy = evaluator.evaluate_model(
+            eval_samples=args.eval_samples,
+            split=args.split,
+            generation_params=generation_params,
+            seed=args.seed,
+            log_file=log_file
+        )
     
     print(f"Evaluation complete. Results logged to {log_file}")
 

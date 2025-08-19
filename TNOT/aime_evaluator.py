@@ -226,15 +226,28 @@ def main():
         "max_new_tokens": 16384 # 32768  # AIME problems can require longer reasoning
     }
     
-    # Run evaluation
-    accuracy, format_accuracy = evaluator.evaluate_model(
-        eval_samples=args.eval_samples,
-        split=args.split,
-        generation_params=generation_params,
-        seed=args.seed,
-        log_file=log_file,
-        version=args.version
-    )
+    # Run evaluation (parallel or sequential)
+    if args.parallel:
+        print("Running parallel evaluation across multiple GPUs...")
+        accuracy, format_accuracy = evaluator.evaluate_model_parallel(
+            eval_samples=args.eval_samples,
+            split=args.split,
+            generation_params=generation_params,
+            seed=args.seed,
+            log_file=log_file,
+            version=args.version,
+            max_parallel_gpus=args.max_parallel_gpus
+        )
+    else:
+        print("Running sequential evaluation...")
+        accuracy, format_accuracy = evaluator.evaluate_model(
+            eval_samples=args.eval_samples,
+            split=args.split,
+            generation_params=generation_params,
+            seed=args.seed,
+            log_file=log_file,
+            version=args.version
+        )
     
     print(f"Evaluation complete. Results logged to {log_file}")
 
