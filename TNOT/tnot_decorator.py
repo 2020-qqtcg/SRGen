@@ -132,7 +132,7 @@ def enable_tnot(model_class):
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
         
-        # Determine current stage for entropy control
+        # Determi画ne current stage for entropy control
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
         stage = "prompt" if prompt_only else "generation"
         
@@ -600,6 +600,7 @@ def _apply_tnot_to_instance(model):
     
     # Define the enhanced forward method
     def enhanced_forward(
+        self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -618,7 +619,7 @@ def _apply_tnot_to_instance(model):
         """Enhanced forward method with TNOT functionality"""
         
         # Handle default values like in original implementation
-        return_dict = return_dict if return_dict is not None else model.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
         # Prepare arguments for original forward method
         forward_kwargs = {
@@ -640,21 +641,21 @@ def _apply_tnot_to_instance(model):
             forward_kwargs['cache_position'] = cache_position
         
         # Call the underlying model's forward method (self.model for CausalLM models)
-        outputs = model.model(**forward_kwargs)
+        outputs = self.model(**forward_kwargs)
         
         # Extract hidden states - consistent with original implementation
         hidden_states = outputs[0]
         original_hidden_states = hidden_states.clone()
         
         # Apply TNOT logic
-        hidden_states = apply_tnot_logic(model, hidden_states, original_hidden_states, input_ids, labels)
+        hidden_states = apply_tnot_logic(self, hidden_states, original_hidden_states, input_ids, labels)
         
         # Handle entropy analysis and recording
-        handle_entropy_analysis(model, hidden_states, past_key_values, input_ids)
+        handle_entropy_analysis(self, hidden_states, past_key_values, input_ids)
         
         # Recompute logits with modified hidden states
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        logits = model.lm_head(hidden_states[:, slice_indices, :])
+        logits = self.lm_head(hidden_states[:, slice_indices, :])
         
         # Determine current stage for entropy control
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
@@ -662,7 +663,7 @@ def _apply_tnot_to_instance(model):
         
         # Apply entropy-based early stopping if enabled
         logits = apply_entropy_control(
-            model, 
+            self, 
             logits, 
             past_key_values, 
             input_ids,
@@ -673,7 +674,7 @@ def _apply_tnot_to_instance(model):
         # Handle loss computation - exactly like original implementation
         loss = None
         if labels is not None:
-            loss = model.loss_function(logits=logits, labels=labels, vocab_size=model.config.vocab_size, **kwargs)
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
         
         # Return in the same format as original implementation
         if not return_dict:
@@ -738,7 +739,7 @@ def _add_tnot_methods(model):
         except Exception as e:
             return f"<decode_error: {e}>"
     
-    def _record_response_entropy(original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file):
+    def _record_response_entropy(self, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file):
         """Record response entropy data - implementation matches original"""
         try:
             # Get tokenizer path
@@ -749,8 +750,8 @@ def _add_tnot_methods(model):
             tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
             
             # Calculate entropy for both original and modified states
-            original_logits = model.lm_head(original_hidden_states)
-            modified_logits = model.lm_head(modified_hidden_states)
+            original_logits = self.lm_head(original_hidden_states)
+            modified_logits = self.lm_head(modified_hidden_states)
             
             # Calculate entropies
             original_probs = F.softmax(original_logits, dim=-1)
@@ -771,11 +772,11 @@ def _add_tnot_methods(model):
                         token_id = input_ids[batch_idx, pos].item()
                         
                         response_entry = {
-                            "index": getattr(model, 'index', 0),
+                            "index": getattr(self, 'index', 0),
                             "batch_idx": batch_idx,
                             "position": pos,
                             "token_id": token_id,
-                            "token_text": model._safe_decode_token(token_id),
+                            "token_text": self._safe_decode_token(token_id),
                             "original_entropy": original_entropy[batch_idx, pos].item(),
                             "modified_entropy": modified_entropy[batch_idx, pos].item(),
                             "entropy_diff": (modified_entropy[batch_idx, pos] - original_entropy[batch_idx, pos]).item(),
@@ -808,4 +809,4 @@ def _add_tnot_methods(model):
     model.reset_model_parameters = reset_model_parameters
     model._safe_decode_token = _safe_decode_token
     model._safe_decode_sequence = _safe_decode_sequence
-    model._record_response_entropy = _record_response_entropy
+    model._record_response_entropy = _record_response_entropy.__get__(model, model.__class__)
