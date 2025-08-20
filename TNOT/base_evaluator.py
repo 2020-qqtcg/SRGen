@@ -45,7 +45,13 @@ class BaseEvaluator:
     def partition_data(data: List[Dict], num_partitions: int) -> List[List[Dict]]:
         """Partition data into roughly equal chunks for parallel processing"""
         if num_partitions <= 1:
-            return [data]
+            # Even for single partition, we need to add global_idx
+            data_with_idx = []
+            for i, item in enumerate(data):
+                item_with_idx = item.copy()
+                item_with_idx['global_idx'] = i
+                data_with_idx.append(item_with_idx)
+            return [data_with_idx]
             
         chunk_size = len(data) // num_partitions
         remainder = len(data) % num_partitions
