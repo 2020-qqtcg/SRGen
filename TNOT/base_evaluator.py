@@ -10,7 +10,8 @@ from typing import List, Dict, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from TNOT.model.modeling_qwen2_tnot import Qwen2ForCausalLM
 from TNOT.model.modeling_llama3_tnot import LlamaForCausalLM
-from TNOT.model.modeling_phi4_tnot import PhiForCausalLM
+from TNOT.model.modeling_phi3_tnot import PhiForCausalLM
+from TNOT.model.modeling_qwen3_tnot import Qwen3ForCausalLM
 
 class BaseEvaluator:
     def __init__(self):
@@ -91,7 +92,8 @@ class BaseEvaluator:
                 model_path,
                 torch_dtype=torch.bfloat16,
                 _attn_implementation="flash_attention_2",
-                device_map=device
+                device_map=device,
+                trust_remote_code=True
             )
         elif model_type == "llama":
             print("Loading with custom LLaMA implementation...")
@@ -99,15 +101,26 @@ class BaseEvaluator:
                 model_path,
                 torch_dtype=torch.bfloat16,
                 _attn_implementation="flash_attention_2",
-                device_map=device
+                device_map=device,
+                trust_remote_code=True
             )
-        elif model_type in ["phi", "phi3"]:
-            print("Loading with custom Phi-4 implementation...")
+        elif model_type in ["phi", "phi3", "phi4flash"]:
+            print(f"Loading with custom Phi-4 implementation (model_type: {model_type})...")
             self.model = PhiForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
                 _attn_implementation="flash_attention_2",
-                device_map=device
+                device_map=device,
+                trust_remote_code=True
+            )
+        elif model_type == "qwen3":
+            print("Loading with custom Qwen3 implementation...")
+            self.model = Qwen3ForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=torch.bfloat16,
+                _attn_implementation="flash_attention_2",
+                device_map=device,
+                trust_remote_code=True
             )
         else:
             print(f"Warning: Model type '{model_type}' not supported with custom TNOT implementation.")
@@ -120,6 +133,36 @@ class BaseEvaluator:
             # Add placeholder methods for unsupported models
             self.model.reset_entropy_detection = lambda: None
             self.model.reset_model_parameters = lambda: None
+            
+        # Check if this is a Phi model and log special handling
+        if self.is_phi_model():
+            print("Phi model detected: Will use combined system+user prompt format")
+        
+    def is_phi_model(self):
+        """Check if the current model is a Phi model"""
+        if self.model is None:
+            return False
+        
+        # Check model type from config
+        model_type = getattr(self.model.config, 'model_type', '').lower()
+        if model_type in ['phi', 'phi3']:
+            return True
+            
+        # Check model class name
+        class_name = self.model.__class__.__name__.lower()
+        if 'phi' in class_name:
+            return True
+            
+        return False
+    
+    def build_prompt_text(self, prompt):
+        """Build prompt text"""
+        # Standard format for other models
+        prompt_text = self.tokenizer.apply_chat_template([
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ], tokenize=False, add_generation_prompt=True)
+        return prompt_text
         
     def load_dataset(self, split, eval_samples=None, **kwargs):
         """Abstract method to load dataset - must be implemented by subclasses"""
@@ -227,10 +270,7 @@ class BaseEvaluator:
                 print(f"Evaluated {i+1}/{total} samples")
                 
             prompt = qa['Q']
-            prompt_text = self.tokenizer.apply_chat_template([
-                {"role": "system", "content": self.get_system_prompt()},
-                {"role": "user", "content": prompt}
-            ], tokenize=False, add_generation_prompt=True)
+            prompt_text = self.build_prompt_text(prompt)
             
             inputs = self.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to(self.model.device)
             
@@ -327,10 +367,7 @@ class BaseEvaluator:
                     print(f"GPU {gpu_id}: Evaluated {i+1}/{total} samples")
                     
                 prompt = qa['Q']
-                prompt_text = self.tokenizer.apply_chat_template([
-                    {"role": "system", "content": self.get_system_prompt()},
-                    {"role": "user", "content": prompt}
-                ], tokenize=False, add_generation_prompt=True)
+                prompt_text = self.build_prompt_text(prompt)
                 
                 inputs = self.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to(self.model.device)
                 
@@ -584,8 +621,7 @@ class BaseEvaluator:
         parser.add_argument("--parallel", action="store_true", help="Enable parallel evaluation across multiple GPUs")
         parser.add_argument("--max_parallel_gpus", type=int, default=None, help="Maximum number of GPUs to use for parallel evaluation")
 
-        # Just for aime
-        parser.add_argument("--version", default="2024", help="Version of AIME")
+        parser.add_argument("--version", type=str, help="Version of Same dataset")
         return parser.parse_args()
 
     @staticmethod

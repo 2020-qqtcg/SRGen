@@ -21,15 +21,17 @@ class MATH500Evaluator(BaseEvaluator):
             self.has_latex2sympy = False
             logging.warning("latex2sympy2_extended not available. LaTeX parsing will be limited.")
 
-    def load_dataset(self, split="test", eval_samples=None, **kwargs):
+    def load_dataset(self, split="test", eval_samples=None, version="math500", **kwargs):
         """Load MATH500 dataset"""
         try:
-            eval_dataset = load_dataset("HuggingFaceH4/MATH-500", split=split)
+            if version == "math500":
+                eval_dataset = load_dataset("HuggingFaceH4/MATH-500", split=split)
+            elif version == "amc":
+                eval_dataset = load_dataset("AI-MO/NuminaMath-CoT", split=split)
+            else:
+                eval_dataset = []
         except:
-            try:
-                eval_dataset = load_dataset("DongfuJiang/MATH-500", split=split)
-            except:
-                raise ValueError("MATH-500 dataset not found. Please ensure the dataset is available.")
+            raise ValueError("MATH dataset not found. Please ensure the dataset is available.")
         
         eval_QAs = []
         for item in eval_dataset:
