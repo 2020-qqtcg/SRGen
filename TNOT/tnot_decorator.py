@@ -107,7 +107,7 @@ def enable_tnot(model_class):
         
         # Extract hidden states - consistent with original implementation
         hidden_states = outputs[0]
-            
+        
         # Store original hidden states for entropy comparison
         original_hidden_states = hidden_states.clone()
         
@@ -132,7 +132,7 @@ def enable_tnot(model_class):
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
         
-        # Determi画ne current stage for entropy control
+        # Determine current stage for entropy control
         prompt_only = os.environ.get("prompt_only", "False") == "True" 
         stage = "prompt" if prompt_only else "generation"
         
@@ -159,9 +159,9 @@ def enable_tnot(model_class):
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            past_key_values=outputs.past_key_values if hasattr(outputs, 'past_key_values') else None,
+            hidden_states=outputs.hidden_states if output_hidden_states else None,
+            attentions=outputs.attentions if output_attentions else None,
         )
     
     def reset_entropy_detection(self):
@@ -619,6 +619,11 @@ def _apply_tnot_to_instance(model):
         """Enhanced forward method with TNOT functionality"""
         
         # Handle default values like in original implementation
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
         # Prepare arguments for original forward method
@@ -648,10 +653,10 @@ def _apply_tnot_to_instance(model):
         original_hidden_states = hidden_states.clone()
         
         # Apply TNOT logic
-        hidden_states = apply_tnot_logic(self, hidden_states, original_hidden_states, input_ids, labels)
+        hidden_states = apply_tnot_logic(self, hidden_states, input_ids, masked_token_ids)
         
         # Handle entropy analysis and recording
-        handle_entropy_analysis(self, hidden_states, past_key_values, input_ids)
+        handle_entropy_analysis(self, original_hidden_states, hidden_states, input_ids, logits_to_keep)
         
         # Recompute logits with modified hidden states
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
