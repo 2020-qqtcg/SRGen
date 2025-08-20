@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from TNOT.model.modeling_qwen2_tnot import Qwen2ForCausalLM
 from TNOT.model.modeling_llama3_tnot import LlamaForCausalLM
-from TNOT.model.modeling_phi3_tnot import PhiForCausalLM
+from TNOT.model.modeling_phi3_tnot import Phi3ForCausalLM
 from TNOT.model.modeling_qwen3_tnot import Qwen3ForCausalLM
 
 class BaseEvaluator:
@@ -106,7 +106,7 @@ class BaseEvaluator:
             )
         elif model_type in ["phi", "phi3", "phi4flash"]:
             print(f"Loading with custom Phi-4 implementation (model_type: {model_type})...")
-            self.model = PhiForCausalLM.from_pretrained(
+            self.model = Phi3ForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
                 _attn_implementation="flash_attention_2",
