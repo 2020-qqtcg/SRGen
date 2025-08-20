@@ -8,10 +8,7 @@ import json
 import time
 from typing import List, Dict, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
-from TNOT.model.modeling_qwen2_tnot import Qwen2ForCausalLM
-from TNOT.model.modeling_llama3_tnot import LlamaForCausalLM
-from TNOT.model.modeling_phi3_tnot import Phi3ForCausalLM
-from TNOT.model.modeling_qwen3_tnot import Qwen3ForCausalLM
+from TNOT.tnot_decorator import enable_tnot
 
 class BaseEvaluator:
     def __init__(self):
@@ -92,53 +89,17 @@ class BaseEvaluator:
         
         print(f"Detected model type: {model_type}")
         
-        if model_type == "qwen2":
-            print("Loading with custom Qwen2 implementation...")
-            self.model = Qwen2ForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                _attn_implementation="flash_attention_2",
-                device_map=device,
-                trust_remote_code=True
-            )
-        elif model_type == "llama":
-            print("Loading with custom LLaMA implementation...")
-            self.model = LlamaForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                _attn_implementation="flash_attention_2",
-                device_map=device,
-                trust_remote_code=True
-            )
-        elif model_type in ["phi", "phi3", "phi4flash"]:
-            print(f"Loading with custom Phi-4 implementation (model_type: {model_type})...")
-            self.model = Phi3ForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                _attn_implementation="flash_attention_2",
-                device_map=device,
-                trust_remote_code=True
-            )
-        elif model_type == "qwen3":
-            print("Loading with custom Qwen3 implementation...")
-            self.model = Qwen3ForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                _attn_implementation="flash_attention_2",
-                device_map=device,
-                trust_remote_code=True
-            )
-        else:
-            print(f"Warning: Model type '{model_type}' not supported with custom TNOT implementation.")
-            print("Falling back to standard AutoModelForCausalLM...")
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                device_map=device
-            )
-            # Add placeholder methods for unsupported models
-            self.model.reset_entropy_detection = lambda: None
-            self.model.reset_model_parameters = lambda: None
+        # Create TNOT-enabled model class
+        TNOTModelClass = enable_tnot(AutoModelForCausalLM)
+        
+        print(f"Loading model with universal TNOT implementation (model_type: {model_type})...")
+        self.model = TNOTModelClass.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            _attn_implementation="flash_attention_2",
+            device_map=device,
+            trust_remote_code=True
+        )
             
         # Check if this is a Phi model and log special handling
         if self.is_phi_model():
