@@ -28,6 +28,8 @@ class MATH500Evaluator(BaseEvaluator):
                 eval_dataset = load_dataset("HuggingFaceH4/MATH-500", split=split)
             elif version == "amc":
                 eval_dataset = load_dataset("AI-MO/NuminaMath-CoT", split=split)
+            elif version == "hmmt2025":
+                eval_dataset = load_dataset("MathArena/hmmt_feb_2025", split=split)
             else:
                 eval_dataset = []
         except:
