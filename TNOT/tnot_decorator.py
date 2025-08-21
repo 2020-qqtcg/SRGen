@@ -545,6 +545,103 @@ def _create_tnot_auto_model_class(auto_model_class):
     return TNOTAutoModelForCausalLM
 
 
+def _enhanced_forward_for_instance(
+    model,
+    input_ids: torch.LongTensor = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
+    inputs_embeds: Optional[torch.FloatTensor] = None,
+    labels: Optional[torch.LongTensor] = None,
+    use_cache: Optional[bool] = None,
+    output_attentions: Optional[bool] = None,
+    output_hidden_states: Optional[bool] = None,
+    return_dict: Optional[bool] = None,
+    cache_position: Optional[torch.LongTensor] = None,
+    logits_to_keep: Union[int, torch.Tensor] = 0,
+    masked_token_ids: Optional[torch.LongTensor] = None,
+    **kwargs,
+) -> Union[Tuple, CausalLMOutputWithPast]:
+    """Enhanced forward method with TNOT functionality for model instances"""
+    
+    # Handle default values like in original implementation
+    output_attentions = output_attentions if output_attentions is not None else model.config.output_attentions
+    output_hidden_states = (
+        output_hidden_states if output_hidden_states is not None else model.config.output_hidden_states
+    )
+    use_cache = use_cache if use_cache is not None else model.config.use_cache
+    return_dict = return_dict if return_dict is not None else model.config.use_return_dict
+    
+    # Prepare arguments for original forward method
+    forward_kwargs = {
+        'input_ids': input_ids,
+        'attention_mask': attention_mask,
+        'position_ids': position_ids,
+        'past_key_values': past_key_values,
+        'inputs_embeds': inputs_embeds,
+        'use_cache': use_cache,
+        'output_attentions': output_attentions,
+        'output_hidden_states': output_hidden_states,
+        'return_dict': return_dict,
+        **kwargs,
+    }
+    
+    # Add cache_position if supported by the model
+    import inspect
+    original_forward = getattr(model.__class__, 'forward', None)
+    if original_forward and 'cache_position' in inspect.signature(original_forward).parameters:
+        forward_kwargs['cache_position'] = cache_position
+    
+    # Call the underlying model's forward method (self.model for CausalLM models)
+    outputs = model.model(**forward_kwargs)
+    
+    # Extract hidden states - consistent with original implementation
+    hidden_states = outputs[0]
+    original_hidden_states = hidden_states.clone()
+    
+    # Apply TNOT logic
+    hidden_states = apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids)
+    
+    # Handle entropy analysis and recording
+    handle_entropy_analysis(model, original_hidden_states, hidden_states, input_ids, logits_to_keep)
+    
+    # Recompute logits with modified hidden states
+    slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+    logits = model.lm_head(hidden_states[:, slice_indices, :])
+    
+    # Determine current stage for entropy control
+    prompt_only = os.environ.get("prompt_only", "False") == "True" 
+    stage = "prompt" if prompt_only else "generation"
+    
+    # Apply entropy-based early stopping if enabled
+    logits = apply_entropy_control(
+        model, 
+        logits, 
+        past_key_values, 
+        input_ids,
+        logits_to_keep,
+        stage
+    )
+    
+    # Handle loss computation - exactly like original implementation
+    loss = None
+    if labels is not None:
+        loss = model.loss_function(logits=logits, labels=labels, vocab_size=model.config.vocab_size, **kwargs)
+    
+    # Return in the same format as original implementation
+    if not return_dict:
+        output = (logits,) + outputs[1:]
+        return (loss,) + output if loss is not None else output
+    
+    return CausalLMOutputWithPast(
+        loss=loss,
+        logits=logits,
+        past_key_values=outputs.past_key_values if hasattr(outputs, 'past_key_values') else None,
+        hidden_states=outputs.hidden_states if output_hidden_states else None,
+        attentions=outputs.attentions if output_attentions else None,
+    )
+
+
 def _apply_tnot_to_instance(model):
     """
     Apply TNOT functionality to an already instantiated model.
@@ -564,108 +661,9 @@ def _apply_tnot_to_instance(model):
     model.entropy_history = []
     model.index = None
     
-    # Store original forward method
-    original_forward = model.forward
-    
-    # Define the enhanced forward method
-    def enhanced_forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        logits_to_keep: Union[int, torch.Tensor] = 0,
-        masked_token_ids: Optional[torch.LongTensor] = None,
-        **kwargs,
-    ) -> Union[Tuple, CausalLMOutputWithPast]:
-        """Enhanced forward method with TNOT functionality"""
-        
-        # Handle default values like in original implementation
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        
-        # Prepare arguments for original forward method
-        forward_kwargs = {
-            'input_ids': input_ids,
-            'attention_mask': attention_mask,
-            'position_ids': position_ids,
-            'past_key_values': past_key_values,
-            'inputs_embeds': inputs_embeds,
-            'use_cache': use_cache,
-            'output_attentions': output_attentions,
-            'output_hidden_states': output_hidden_states,
-            'return_dict': return_dict,
-            **kwargs,
-        }
-        
-        # Add cache_position if supported by the model
-        import inspect
-        if 'cache_position' in inspect.signature(original_forward).parameters:
-            forward_kwargs['cache_position'] = cache_position
-        
-        # Call the underlying model's forward method (self.model for CausalLM models)
-        outputs = self.model(**forward_kwargs)
-        
-        # Extract hidden states - consistent with original implementation
-        hidden_states = outputs[0]
-        original_hidden_states = hidden_states.clone()
-        
-        # Apply TNOT logic
-        hidden_states = apply_tnot_logic(self, hidden_states, input_ids, masked_token_ids)
-        
-        # Handle entropy analysis and recording
-        handle_entropy_analysis(self, original_hidden_states, hidden_states, input_ids, logits_to_keep)
-        
-        # Recompute logits with modified hidden states
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        logits = self.lm_head(hidden_states[:, slice_indices, :])
-        
-        # Determine current stage for entropy control
-        prompt_only = os.environ.get("prompt_only", "False") == "True" 
-        stage = "prompt" if prompt_only else "generation"
-        
-        # Apply entropy-based early stopping if enabled
-        logits = apply_entropy_control(
-            self, 
-            logits, 
-            past_key_values, 
-            input_ids,
-            logits_to_keep,
-            stage
-        )
-        
-        # Handle loss computation - exactly like original implementation
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-        
-        # Return in the same format as original implementation
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
-        
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
-            past_key_values=outputs.past_key_values if hasattr(outputs, 'past_key_values') else None,
-            hidden_states=outputs.hidden_states if output_hidden_states else None,
-            attentions=outputs.attentions if output_attentions else None,
-        )
-    
     # Replace the model's forward method with our enhanced version
-    # Use bound method to ensure 'self' refers to the model instance
-    model.forward = enhanced_forward.__get__(model, model.__class__)
+    # Use functools.partial to create a pickleable bound method
+    model.forward = functools.partial(_enhanced_forward_for_instance, model)
     
     # Add the missing TNOT methods
     _add_tnot_methods(model)
