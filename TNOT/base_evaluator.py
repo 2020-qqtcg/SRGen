@@ -570,6 +570,7 @@ class BaseEvaluator:
         parser.add_argument("--split", type=str, default="test", choices=["test", "train"], help="Dataset split to evaluate on")
         parser.add_argument("--do_sample", action="store_true", help="Whether to use sampling for generation")
         parser.add_argument("--temperature", type=float, default=0.9, help="Generation temperature")
+        parser.add_argument("--max_new_tokens", type=int, default=4096, help="Maximum number of new tokens to generate")
         parser.add_argument("--seed", type=int, default=42, help="Random seed for consistent evaluation samples")
         parser.add_argument("--use_entropy_control", action="store_true", help="Enable entropy-based early stopping and continuation")
         parser.add_argument("--entropy_threshold", type=float, default=5.0, help="Entropy threshold for early stopping")

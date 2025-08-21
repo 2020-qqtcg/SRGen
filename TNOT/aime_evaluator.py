@@ -223,7 +223,7 @@ def main():
     generation_params = {
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": 16384 # 32768  # AIME problems can require longer reasoning
+        "max_new_tokens": args.max_new_tokens
     }
     
     # Run evaluation (parallel or sequential)

@@ -135,7 +135,7 @@ def main():
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
         "top_p": 0.95 if args.do_sample else None,
-        "max_new_tokens": 16384,
+        "max_new_tokens": args.max_new_tokens,
         "masked_token_ids": masked_token_ids
     }
 

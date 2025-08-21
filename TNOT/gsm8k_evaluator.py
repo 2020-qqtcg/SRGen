@@ -157,7 +157,7 @@ def main():
     generation_params = {
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": 2048,
+        "max_new_tokens": args.max_new_tokens,
         "masked_token_ids": masked_token_ids
     }
     
