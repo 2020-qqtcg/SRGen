@@ -28,6 +28,7 @@ from typing import Optional, Union, Tuple, List
 from transformers import AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.cache_utils import Cache
+import functools
 
 
 def enable_tnot(model_class):
@@ -164,45 +165,13 @@ def enable_tnot(model_class):
             attentions=outputs.attentions if output_attentions else None,
         )
     
-    def reset_entropy_detection(self):
-        """Reset entropy detection state for new generation"""
-        self.high_entropy_detected = False
-        self.high_entropy_position = None
-
-    def reset_model_parameters(self):
-        """Reset TNOT model parameters"""
-        self.delta = None
-        self.entropy_threshold = None
-        self.entropy_history = []
-    
-    def _safe_decode_token(self, token_id):
-        """Safely decode a token ID to text, handling potential errors"""
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
-            decoded = tokenizer.decode([token_id], skip_special_tokens=False)
-            decoded = decoded.strip()
-            if not decoded:
-                decoded = tokenizer.convert_ids_to_tokens([token_id])[0]
-            return decoded
-        except Exception as e:
-            return f"<decode_error_{token_id}>"
-    
-    def _safe_decode_sequence(self, token_ids):
-        """Safely decode a sequence of token IDs to text"""
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
-            decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
-            return decoded
-        except Exception as e:
-            return f"<decode_error: {e}>"
-    
-    # Replace methods in the class
+    # Replace methods in the class using module-level functions
     model_class.__init__ = enhanced_init
     model_class.forward = enhanced_forward
-    model_class.reset_entropy_detection = reset_entropy_detection
-    model_class.reset_model_parameters = reset_model_parameters
-    model_class._safe_decode_token = _safe_decode_token
-    model_class._safe_decode_sequence = _safe_decode_sequence
+    model_class.reset_entropy_detection = _reset_entropy_detection_method
+    model_class.reset_model_parameters = _reset_model_parameters_method
+    model_class._safe_decode_token = _safe_decode_token_method
+    model_class._safe_decode_sequence = _safe_decode_sequence_method
     
     return model_class
 
@@ -704,114 +673,139 @@ def _apply_tnot_to_instance(model):
     return model
 
 
+def _reset_entropy_detection(model):
+    """Reset entropy detection state for new generation"""
+    model.high_entropy_detected = False
+    model.high_entropy_position = None
+
+
+def _reset_model_parameters(model):
+    """Reset model parameters"""
+    model.delta = None
+    model.entropy_threshold = None
+    model.entropy_history = []
+
+
+def _safe_decode_token(token_id):
+    """Safely decode a token ID to text, handling potential errors"""
+    try:
+        # Try to get tokenizer from the model
+        tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
+        # Decode the token
+        decoded = tokenizer.decode([token_id], skip_special_tokens=False)
+        # Clean up the decoded text (remove extra spaces, special formatting)
+        decoded = decoded.strip()
+        if not decoded:  # If empty after stripping
+            decoded = tokenizer.convert_ids_to_tokens([token_id])[0]
+        return decoded
+    except Exception as e:
+        return f"<decode_error_{token_id}>"
+
+
+def _safe_decode_sequence(token_ids):
+    """Safely decode a sequence of token IDs to text"""
+    try:
+        # Try to get tokenizer from the model
+        tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
+        # Decode the sequence
+        decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
+        return decoded
+    except Exception as e:
+        return f"<decode_error: {e}>"
+
+
+def _record_response_entropy(model, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file):
+    """Record response entropy data - implementation matches original"""
+    try:
+        # Get tokenizer path
+        tokenizer_path = os.environ.get("tokenizer_path")
+        if not tokenizer_path:
+            return
+        
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        
+        # Calculate entropy for both original and modified states
+        original_logits = model.lm_head(original_hidden_states)
+        modified_logits = model.lm_head(modified_hidden_states)
+        
+        # Calculate entropies
+        original_probs = F.softmax(original_logits, dim=-1)
+        modified_probs = F.softmax(modified_logits, dim=-1)
+        
+        original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-8), dim=-1)
+        modified_entropy = -torch.sum(modified_probs * torch.log(modified_probs + 1e-8), dim=-1)
+        
+        # Prepare response data
+        response_data = []
+        
+        batch_size, seq_len = input_ids.shape
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        
+        for batch_idx in range(batch_size):
+            for pos in range(seq_len):
+                if slice_indices == slice(None) or pos >= seq_len + slice_indices.start:
+                    token_id = input_ids[batch_idx, pos].item()
+                    
+                    response_entry = {
+                        "index": getattr(model, 'index', 0),
+                        "batch_idx": batch_idx,
+                        "position": pos,
+                        "token_id": token_id,
+                        "token_text": _safe_decode_token(token_id),
+                        "original_entropy": original_entropy[batch_idx, pos].item(),
+                        "modified_entropy": modified_entropy[batch_idx, pos].item(),
+                        "entropy_diff": (modified_entropy[batch_idx, pos] - original_entropy[batch_idx, pos]).item(),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    response_data.append(response_entry)
+        
+        # Load existing data and append new data
+        existing_data = []
+        if os.path.exists(response_entropy_file):
+            try:
+                with open(response_entropy_file, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                existing_data = []
+        
+        # Extend existing data with new response data
+        existing_data.extend(response_data)
+        
+        # Write updated data back to file
+        with open(response_entropy_file, "w", encoding="utf-8") as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+                
+    except Exception as e:
+        # Log error but don't interrupt the forward pass
+        print(f"Error in response entropy recording: {e}")
+
+
+def _reset_entropy_detection_method(self):
+    """Method wrapper for reset_entropy_detection"""
+    return _reset_entropy_detection(self)
+
+
+def _reset_model_parameters_method(self):
+    """Method wrapper for reset_model_parameters"""
+    return _reset_model_parameters(self)
+
+
+def _safe_decode_token_method(self, token_id):
+    """Method wrapper for _safe_decode_token"""
+    return _safe_decode_token(token_id)
+
+
+def _safe_decode_sequence_method(self, token_ids):
+    """Method wrapper for _safe_decode_sequence"""
+    return _safe_decode_sequence(token_ids)
+
+
 def _add_tnot_methods(model):
     """Add all the TNOT-specific methods to the model instance"""
     
-    def reset_entropy_detection():
-        """Reset entropy detection state for new generation"""
-        model.high_entropy_detected = False
-        model.high_entropy_position = None
-    
-    def reset_model_parameters():
-        """Reset model parameters"""
-        model.delta = None
-        model.entropy_threshold = None
-        model.entropy_history = []
-    
-    def _safe_decode_token(token_id):
-        """Safely decode a token ID to text, handling potential errors"""
-        try:
-            # Try to get tokenizer from the model
-            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
-            # Decode the token
-            decoded = tokenizer.decode([token_id], skip_special_tokens=False)
-            # Clean up the decoded text (remove extra spaces, special formatting)
-            decoded = decoded.strip()
-            if not decoded:  # If empty after stripping
-                decoded = tokenizer.convert_ids_to_tokens([token_id])[0]
-            return decoded
-        except Exception as e:
-            return f"<decode_error_{token_id}>"
-    
-    def _safe_decode_sequence(token_ids):
-        """Safely decode a sequence of token IDs to text"""
-        try:
-            # Try to get tokenizer from the model
-            tokenizer = AutoTokenizer.from_pretrained(os.environ.get("tokenizer_path"))
-            # Decode the sequence
-            decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
-            return decoded
-        except Exception as e:
-            return f"<decode_error: {e}>"
-    
-    def _record_response_entropy(self, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file):
-        """Record response entropy data - implementation matches original"""
-        try:
-            # Get tokenizer path
-            tokenizer_path = os.environ.get("tokenizer_path")
-            if not tokenizer_path:
-                return
-            
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-            
-            # Calculate entropy for both original and modified states
-            original_logits = self.lm_head(original_hidden_states)
-            modified_logits = self.lm_head(modified_hidden_states)
-            
-            # Calculate entropies
-            original_probs = F.softmax(original_logits, dim=-1)
-            modified_probs = F.softmax(modified_logits, dim=-1)
-            
-            original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-8), dim=-1)
-            modified_entropy = -torch.sum(modified_probs * torch.log(modified_probs + 1e-8), dim=-1)
-            
-            # Prepare response data
-            response_data = []
-            
-            batch_size, seq_len = input_ids.shape
-            slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-            
-            for batch_idx in range(batch_size):
-                for pos in range(seq_len):
-                    if slice_indices == slice(None) or pos >= seq_len + slice_indices.start:
-                        token_id = input_ids[batch_idx, pos].item()
-                        
-                        response_entry = {
-                            "index": getattr(self, 'index', 0),
-                            "batch_idx": batch_idx,
-                            "position": pos,
-                            "token_id": token_id,
-                            "token_text": self._safe_decode_token(token_id),
-                            "original_entropy": original_entropy[batch_idx, pos].item(),
-                            "modified_entropy": modified_entropy[batch_idx, pos].item(),
-                            "entropy_diff": (modified_entropy[batch_idx, pos] - original_entropy[batch_idx, pos]).item(),
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        response_data.append(response_entry)
-            
-            # Load existing data and append new data
-            existing_data = []
-            if os.path.exists(response_entropy_file):
-                try:
-                    with open(response_entropy_file, "r", encoding="utf-8") as f:
-                        existing_data = json.load(f)
-                except (json.JSONDecodeError, FileNotFoundError):
-                    existing_data = []
-            
-            # Extend existing data with new response data
-            existing_data.extend(response_data)
-            
-            # Write updated data back to file
-            with open(response_entropy_file, "w", encoding="utf-8") as f:
-                json.dump(existing_data, f, ensure_ascii=False, indent=2)
-                    
-        except Exception as e:
-            # Log error but don't interrupt the forward pass
-            print(f"Error in response entropy recording: {e}")
-    
-    # Bind methods to the model instance
-    model.reset_entropy_detection = reset_entropy_detection
-    model.reset_model_parameters = reset_model_parameters
-    model._safe_decode_token = _safe_decode_token
-    model._safe_decode_sequence = _safe_decode_sequence
-    model._record_response_entropy = _record_response_entropy.__get__(model, model.__class__)
+    # Use functools.partial to create pickleable bound methods
+    model.reset_entropy_detection = functools.partial(_reset_entropy_detection, model)
+    model.reset_model_parameters = functools.partial(_reset_model_parameters, model)
+    model._safe_decode_token = _safe_decode_token  # This doesn't need the model
+    model._safe_decode_sequence = _safe_decode_sequence  # This doesn't need the model
+    model._record_response_entropy = functools.partial(_record_response_entropy, model)
