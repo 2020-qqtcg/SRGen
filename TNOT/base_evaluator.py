@@ -588,6 +588,9 @@ class BaseEvaluator:
         # Parallel evaluation arguments
         parser.add_argument("--parallel", action="store_true", help="Enable parallel evaluation across multiple GPUs")
         parser.add_argument("--max_parallel_gpus", type=int, default=None, help="Maximum number of GPUs to use for parallel evaluation")
+        
+        # Average evaluation arguments
+        parser.add_argument("--average", type=int, default=1, help="Number of times to run evaluation and take average")
 
         parser.add_argument("--version", type=str, help="Version of Same dataset")
         return parser.parse_args()
@@ -627,8 +630,9 @@ class BaseEvaluator:
 
         mask_special_suffix = "" if args.mask_special_tokens else "_nomask"
         parallel_suffix = "_parallel" if getattr(args, 'parallel', False) else ""
+        average_suffix = f"_avg_{args.average}" if args.average > 1 else ""
 
-        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{adaptive_entropy_suffix}_reatries_{max_retries}{do_sample_suffix}{mask_special_suffix}{parallel_suffix}.txt")
+        log_file = os.path.join(log_dir, f"log_{model_name}_times_{args.times}_lr_{args.lr}{entropy_suffix}{adaptive_entropy_suffix}_reatries_{max_retries}{do_sample_suffix}{mask_special_suffix}{parallel_suffix}{average_suffix}.txt")
         
         with open(log_file, "w") as f:
             f.write(f"Model Path: {args.model_path}\n")
@@ -648,6 +652,7 @@ class BaseEvaluator:
             f.write(f"Parallel Evaluation: {getattr(args, 'parallel', False)}\n")
             if getattr(args, 'parallel', False):
                 f.write(f"Max Parallel GPUs: {getattr(args, 'max_parallel_gpus', 'All available')}\n")
+            f.write(f"Average Runs: {args.average}\n")
             f.write("\n")
         
         return log_file

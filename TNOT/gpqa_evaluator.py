@@ -141,26 +141,77 @@ def main():
 
     print("Generation parameters:", generation_params)
     
-    # Run evaluation (parallel or sequential)
-    if args.parallel:
-        print("Running parallel evaluation across multiple GPUs...")
-        accuracy, format_accuracy = evaluator.evaluate_model_parallel(
-            eval_samples=args.eval_samples,
-            split=args.split,
-            generation_params=generation_params,
-            seed=args.seed,
-            log_file=log_file,
-            max_parallel_gpus=args.max_parallel_gpus
-        )
+    # Run evaluation multiple times and take average if specified
+    if args.average > 1:
+        print(f"Running evaluation {args.average} times and taking average...")
+        accuracies = []
+        format_accuracies = []
+        
+        for run in range(args.average):
+            print(f"Run {run + 1}/{args.average}...")
+            # Use different seeds for each run to get varied results
+            current_seed = args.seed + run
+            
+            if args.parallel:
+                accuracy, format_accuracy = evaluator.evaluate_model_parallel(
+                    eval_samples=args.eval_samples,
+                    split=args.split,
+                    generation_params=generation_params,
+                    seed=current_seed,
+                    log_file=log_file,
+                    max_parallel_gpus=args.max_parallel_gpus
+                )
+            else:
+                accuracy, format_accuracy = evaluator.evaluate_model(
+                    eval_samples=args.eval_samples,
+                    split=args.split,
+                    generation_params=generation_params,
+                    seed=current_seed,
+                    log_file=log_file
+                )
+            
+            accuracies.append(accuracy)
+            format_accuracies.append(format_accuracy)
+            print(f"Run {run + 1} - Accuracy: {accuracy:.4f}, Format Accuracy: {format_accuracy:.4f}")
+        
+        # Calculate averages
+        avg_accuracy = sum(accuracies) / len(accuracies)
+        avg_format_accuracy = sum(format_accuracies) / len(format_accuracies)
+        
+        # Log average results
+        with open(log_file, "a") as f:
+            f.write(f"\n=== AVERAGE RESULTS ({args.average} runs) ===\n")
+            f.write(f"Individual Accuracies: {[f'{acc:.4f}' for acc in accuracies]}\n")
+            f.write(f"Individual Format Accuracies: {[f'{acc:.4f}' for acc in format_accuracies]}\n")
+            f.write(f"Average Accuracy: {avg_accuracy:.4f}\n")
+            f.write(f"Average Format Accuracy: {avg_format_accuracy:.4f}\n")
+            f.write(f"Accuracy Std Dev: {(sum((x - avg_accuracy)**2 for x in accuracies) / len(accuracies))**0.5:.4f}\n")
+            f.write(f"Format Accuracy Std Dev: {(sum((x - avg_format_accuracy)**2 for x in format_accuracies) / len(format_accuracies))**0.5:.4f}\n")
+        
+        print(f"Average Accuracy: {avg_accuracy:.4f} (±{(sum((x - avg_accuracy)**2 for x in accuracies) / len(accuracies))**0.5:.4f})")
+        print(f"Average Format Accuracy: {avg_format_accuracy:.4f} (±{(sum((x - avg_format_accuracy)**2 for x in format_accuracies) / len(format_accuracies))**0.5:.4f})")
+        
     else:
-        print("Running sequential evaluation...")
-        accuracy, format_accuracy = evaluator.evaluate_model(
-            eval_samples=args.eval_samples,
-            split=args.split,
-            generation_params=generation_params,
-            seed=args.seed,
-            log_file=log_file
-        )
+        # Run evaluation once (original behavior)
+        if args.parallel:
+            print("Running parallel evaluation across multiple GPUs...")
+            accuracy, format_accuracy = evaluator.evaluate_model_parallel(
+                eval_samples=args.eval_samples,
+                split=args.split,
+                generation_params=generation_params,
+                seed=args.seed,
+                log_file=log_file,
+                max_parallel_gpus=args.max_parallel_gpus
+            )
+        else:
+            print("Running sequential evaluation...")
+            accuracy, format_accuracy = evaluator.evaluate_model(
+                eval_samples=args.eval_samples,
+                split=args.split,
+                generation_params=generation_params,
+                seed=args.seed,
+                log_file=log_file
+            )
     
     print(f"Evaluation complete. Results logged to {log_file}")
 
