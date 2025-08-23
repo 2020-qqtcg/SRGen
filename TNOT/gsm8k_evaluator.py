@@ -169,15 +169,13 @@ def main():
         
         for run in range(args.average):
             print(f"Run {run + 1}/{args.average}...")
-            # Use different seeds for each run to get varied results
-            current_seed = args.seed + run
             
             if args.parallel:
                 accuracy, format_accuracy = evaluator.evaluate_model_parallel(
                     eval_samples=args.eval_samples,
                     split=args.split,
                     generation_params=generation_params,
-                    seed=current_seed,
+                    seed=args.seed,
                     log_file=log_file,
                     max_parallel_gpus=args.max_parallel_gpus
                 )
@@ -186,7 +184,7 @@ def main():
                     eval_samples=args.eval_samples,
                     split=args.split,
                     generation_params=generation_params,
-                    seed=current_seed,
+                    seed=args.seed,
                     log_file=log_file
                 )
             
