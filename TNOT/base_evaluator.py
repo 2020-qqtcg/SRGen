@@ -316,7 +316,7 @@ class BaseEvaluator:
             # Load model on this GPU
             self.load_model(os.environ.get("model_path"), device)
             self.model.eval()
-            random.seed(seed + gpu_id)  # Different seed for each process
+            random.seed(seed)
             
             correct = 0
             format_correct = 0
