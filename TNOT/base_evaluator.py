@@ -98,7 +98,8 @@ class BaseEvaluator:
             torch_dtype=torch.bfloat16,
             _attn_implementation="flash_attention_2",
             device_map=device,
-            trust_remote_code=True
+            trust_remote_code=True,
+            use_cache=True  # Enable KV caching for faster generation
         )
             
         # Check if this is a Phi model and log special handling
