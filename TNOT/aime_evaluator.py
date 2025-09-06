@@ -3,6 +3,7 @@ import random
 from typing import Optional, List, Tuple
 from datasets import load_dataset
 from TNOT.base_evaluator import BaseEvaluator
+from transformers import AutoTokenizer
 
 class AIMEEvaluator(BaseEvaluator):
     def load_dataset(self, split="train", eval_samples=None, version="2024"):
@@ -217,13 +218,22 @@ def main():
     evaluator.setup_environment(args)
     log_file = evaluator.setup_logging(args)
     
-    evaluator.load_model(args.model_path, device=args.device)
+    if not args.parallel:
+        evaluator.load_model(args.model_path, device=args.device)
+    else:
+        evaluator.model_path = args.model_path
     
+    evaluator.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    masked_token_ids = [
+        evaluator.tokenizer.encode(token, add_special_tokens=False)[0] 
+        for token in ["system", "user", "assistant", ":", "\n"]
+    ] if args.mask_special_tokens else None
     # Set generation parameters
     generation_params = {
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": args.max_new_tokens
+        "max_new_tokens": args.max_new_tokens,
+        "masked_token_ids": masked_token_ids
     }
     
     # Run evaluation multiple times and take average if specified

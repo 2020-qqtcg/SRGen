@@ -1,13 +1,13 @@
 import re
 import random
 import sympy
-from sympy import Basic, MatrixBase, Float, Number, Rational, E, Symbol, Mul, simplify
+from sympy import Basic, MatrixBase, Float, Number, E, Symbol, Mul, simplify
 from sympy.parsing.sympy_parser import parse_expr
 from datasets import load_dataset
 from TNOT.base_evaluator import BaseEvaluator
-from functools import lru_cache
 from itertools import product
 import logging
+from transformers import AutoTokenizer
 
 class MATH500Evaluator(BaseEvaluator):
     def __init__(self):
@@ -466,8 +466,12 @@ def main():
     # Setup environment and logging
     evaluator.setup_environment(args)
     log_file = evaluator.setup_logging(args)
-    evaluator.load_model(args.model_path, device=args.device)
+    if not args.parallel:
+        evaluator.load_model(args.model_path, device=args.device)
+    else:
+        evaluator.model_path = args.model_path
 
+    evaluator.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     masked_token_ids = [
         evaluator.tokenizer.encode(token, add_special_tokens=False)[0] 
         for token in ["system", "user", "assistant", ":", "\n"]

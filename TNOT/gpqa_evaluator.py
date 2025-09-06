@@ -2,6 +2,7 @@ import re
 import random
 from datasets import load_dataset
 from TNOT.base_evaluator import BaseEvaluator
+from transformers import AutoTokenizer
 
 class GPQAEvaluator(BaseEvaluator):
     def load_dataset(self, split="train", eval_samples=None, **kwargs):
@@ -123,8 +124,12 @@ def main():
     evaluator.setup_environment(args)
     log_file = evaluator.setup_logging(args)
     
-    evaluator.load_model(args.model_path, device=args.device)
+    if not args.parallel:
+        evaluator.load_model(args.model_path, device=args.device)
+    else:
+        evaluator.model_path = args.model_path
 
+    evaluator.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     masked_token_ids = [
         evaluator.tokenizer.encode(token, add_special_tokens=False)[0] 
         for token in ["system", "user", "assistant", ":", "\n"]

@@ -171,14 +171,18 @@ class BaseEvaluator:
             
             new_tokens = outputs[0][current_inputs['input_ids'].shape[1]:]
             completion_part = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            del outputs
+            torch.cuda.empty_cache()
             
             if self.model.high_entropy_detected:
                 print(f"High entropy detected at retry {retry_count}, position {self.model.high_entropy_position}")
                 print(f"Partial completion: {completion_part}")
                 
-                full_completion += completion_part
+                old_inputs = current_inputs
                 new_text = self.tokenizer.decode(current_inputs['input_ids'][0], skip_special_tokens=True) + completion_part
                 current_inputs = self.tokenizer(new_text, return_tensors="pt", add_special_tokens=False).to(self.model.device)
+                del old_inputs  # 释放旧的inputs
                 
                 retry_count += 1
                 print(f"Continuing generation with {current_inputs['input_ids'].shape[1]} tokens")

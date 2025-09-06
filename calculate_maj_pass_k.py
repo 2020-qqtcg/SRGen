@@ -4,6 +4,9 @@
 
 maj@k: 多数投票准确率，对于每个问题，如果k次运行中超过一半的结果正确，则该问题算作正确
 pass@k: 通过率，对于每个问题，如果k次运行中至少有一次结果正确，则该问题算作正确
+
+支持任意数量的测试案例（不再限制为30个），可以处理大规模数据集。
+支持自定义显示的样本数量和k值范围。
 """
 
 import re
@@ -101,9 +104,15 @@ def calculate_pass_at_k(results: Dict[int, List[bool]], k: int) -> float:
     return correct_samples / total_samples if total_samples > 0 else 0.0
 
 
-def print_statistics(results: Dict[int, List[bool]], num_samples: int, num_runs: int):
+def print_statistics(results: Dict[int, List[bool]], num_samples: int, num_runs: int, max_display_samples: float = 50):
     """
     打印详细的统计信息
+    
+    Args:
+        results: 每个样本的运行结果
+        num_samples: 每轮的样本数量
+        num_runs: 运行轮数  
+        max_display_samples: 最大显示的样本数量，可以是float('inf')表示显示所有
     """
     print(f"=== 日志文件统计信息 ===")
     print(f"样本数量: {num_samples}")
@@ -123,10 +132,21 @@ def print_statistics(results: Dict[int, List[bool]], num_samples: int, num_runs:
     print(f"=== 每个样本的统计 ===")
     print(f"{'样本ID':<8} {'正确次数':<10} {'总次数':<8} {'准确率':<10}")
     print("-" * 40)
-    for sample_id, correct, total, acc in sample_stats[:10]:  # 只显示前10个
-        print(f"{sample_id:<8} {correct:<10} {total:<8} {acc:.4f}")
-    if len(sample_stats) > 10:
-        print(f"... (还有 {len(sample_stats) - 10} 个样本)")
+    
+    # 显示所有样本的统计，但如果样本太多，可以选择性显示
+    if len(sample_stats) <= max_display_samples or max_display_samples == float('inf'):
+        # 样本数少于等于阈值时，或者设置为显示所有样本时，显示所有样本
+        for sample_id, correct, total, acc in sample_stats:
+            print(f"{sample_id:<8} {correct:<10} {total:<8} {acc:.4f}")
+    else:
+        # 超过阈值时，显示前面一部分和后面一部分，中间用省略号
+        show_front = int(max_display_samples // 2)
+        show_back = int(max_display_samples - show_front)
+        for sample_id, correct, total, acc in sample_stats[:show_front]:
+            print(f"{sample_id:<8} {correct:<10} {total:<8} {acc:.4f}")
+        print(f"... (省略中间 {len(sample_stats) - int(max_display_samples)} 个样本)")
+        for sample_id, correct, total, acc in sample_stats[-show_back:]:
+            print(f"{sample_id:<8} {correct:<10} {total:<8} {acc:.4f}")
     print()
     
     # 计算不同k值的maj@k和pass@k
@@ -135,7 +155,19 @@ def print_statistics(results: Dict[int, List[bool]], num_samples: int, num_runs:
     print(f"{'k':<5} {'maj@k':<10} {'pass@k':<10}")
     print("-" * 25)
     
-    for k in range(1, min(max_k + 1, 11)):  # 计算k=1到10或最大k值
+    # 智能显示k值范围：如果max_k很大，选择性显示重要的k值
+    if max_k <= 20:
+        # 小于等于20时，显示所有k值
+        k_values = list(range(1, max_k + 1))
+    else:
+        # 大于20时，显示前10个，然后每5个显示一个，最后显示max_k
+        k_values = list(range(1, 11))  # 1-10
+        for k in range(15, max_k, 5):  # 15, 20, 25, ...
+            k_values.append(k)
+        if max_k not in k_values:
+            k_values.append(max_k)
+    
+    for k in k_values:
         maj_k = calculate_maj_at_k(results, k)
         pass_k = calculate_pass_at_k(results, k)
         print(f"{k:<5} {maj_k:.4f}     {pass_k:.4f}")
@@ -145,6 +177,10 @@ def main():
     parser = argparse.ArgumentParser(description='计算模型运行结果的maj@k和pass@k准确率')
     parser.add_argument('log_file', help='日志文件路径')
     parser.add_argument('--k', type=int, help='指定k值计算maj@k和pass@k')
+    parser.add_argument('--max-display-samples', type=int, default=50, 
+                       help='最大显示样本数量 (默认: 50)')
+    parser.add_argument('--show-all-samples', action='store_true',
+                       help='显示所有样本的详细统计 (忽略max-display-samples限制)')
     
     args = parser.parse_args()
     
@@ -157,7 +193,8 @@ def main():
         return
     
     # 打印统计信息
-    print_statistics(results, num_samples, num_runs)
+    max_display = float('inf') if args.show_all_samples else args.max_display_samples
+    print_statistics(results, num_samples, num_runs, max_display)
     
     # 如果指定了k值，单独计算
     if args.k:

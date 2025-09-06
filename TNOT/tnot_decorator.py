@@ -111,13 +111,17 @@ def enable_tnot(model_class):
         
         # Store original hidden states for entropy comparison
         original_hidden_states = hidden_states.clone()
+
+        prompt_only = os.environ.get("prompt_only", "False") == "True" 
+        stage = "prompt" if prompt_only else "generation"
         
         # Apply TNOT logic
         hidden_states = apply_tnot_logic(
             self, 
             hidden_states, 
             input_ids, 
-            masked_token_ids
+            masked_token_ids,
+            prompt_only
         )
         
         # Handle entropy recording and analysis
@@ -132,10 +136,6 @@ def enable_tnot(model_class):
         # Recompute logits with modified hidden states
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
-        
-        # Determine current stage for entropy control
-        prompt_only = os.environ.get("prompt_only", "False") == "True" 
-        stage = "prompt" if prompt_only else "generation"
         
         # Apply entropy-based early stopping if enabled
         logits = apply_entropy_control(
@@ -176,7 +176,7 @@ def enable_tnot(model_class):
     return model_class
 
 
-def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids):
+def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_only):
     """
     Apply TNOT (Test-time Training) logic to hidden states
     
@@ -201,11 +201,9 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids):
         lr = float(os.environ.get("lr", 0.1))
         
         with torch.enable_grad():
-            # Initialize two deltas
-            delta_high = nn.Parameter(0.0 * torch.randn([1, 1, hidden_states.shape[-1]]).to(hidden_states))
-            delta_normal = nn.Parameter(0.0 * torch.randn([1, 1, hidden_states.shape[-1]]).to(hidden_states))
             
             if model.delta is not None:
+                delta_high = nn.Parameter(0.0 * torch.randn([1, 1, hidden_states.shape[-1]]).to(hidden_states))
                 # Optimize delta_high with joint loss (CE + entropy)
                 optimizer_high = torch.optim.AdamW([delta_high], lr=lr, weight_decay=1e-8, eps=1e-5)
                 for _ in range(times):
@@ -247,6 +245,7 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids):
             
             # Optimize delta_normal with only cross-entropy loss
             else:
+                delta_normal = nn.Parameter(0.0 * torch.randn([1, 1, hidden_states.shape[-1]]).to(hidden_states))
                 optimizer_normal = torch.optim.AdamW([delta_normal], lr=lr, weight_decay=1e-8, eps=1e-5)
                 for _ in range(times):
                     optimizer_normal.zero_grad()
@@ -598,9 +597,12 @@ def _enhanced_forward_for_instance(
     # Extract hidden states - consistent with original implementation
     hidden_states = outputs[0]
     original_hidden_states = hidden_states.clone()
+
+    prompt_only = os.environ.get("prompt_only", "False") == "True" 
+    stage = "prompt" if prompt_only else "generation"
     
     # Apply TNOT logic
-    hidden_states = apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids)
+    hidden_states = apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_only)
     
     # Handle entropy analysis and recording
     handle_entropy_analysis(model, original_hidden_states, hidden_states, input_ids, logits_to_keep)
@@ -608,10 +610,6 @@ def _enhanced_forward_for_instance(
     # Recompute logits with modified hidden states
     slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
     logits = model.lm_head(hidden_states[:, slice_indices, :])
-    
-    # Determine current stage for entropy control
-    prompt_only = os.environ.get("prompt_only", "False") == "True" 
-    stage = "prompt" if prompt_only else "generation"
     
     # Apply entropy-based early stopping if enabled
     logits = apply_entropy_control(
