@@ -279,7 +279,7 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
                 # at the end of prompt stage. It's only used during optimization.
                 # hidden_states = hidden_states + model.delta
         
-        self.prompt_only = False
+        model.prompt_only = False
         torch.cuda.empty_cache()
         
     else:
