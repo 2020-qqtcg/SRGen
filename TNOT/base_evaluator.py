@@ -161,7 +161,7 @@ class BaseEvaluator:
         
         while retry_count < max_retries:
             self.model.reset_entropy_detection()
-            os.environ["prompt_only"] = "True"  
+            self.model.prompt_only = True
             
             outputs = self.model.generate(
                 **current_inputs,
@@ -194,7 +194,7 @@ class BaseEvaluator:
             print(f"Max retries ({max_retries}) reached due to high entropy, continuing with normal generation")
             
             os.environ["entropy_control"] = "False"
-            os.environ["prompt_only"] = "False"
+            self.model.prompt_only = False
             
             self.model.reset_entropy_detection()
             
@@ -252,7 +252,7 @@ class BaseEvaluator:
                 completion, retry_count = self.generate_with_entropy_control(inputs, generation_params, max_retries)
                 print(f"--- Sample {i+1} use_entropy_control end---")
             else:
-                os.environ["prompt_only"] = "True"
+                self.model.prompt_only = True
                 outputs = self.model.generate(
                     **inputs,
                     **generation_params,
@@ -347,7 +347,7 @@ class BaseEvaluator:
                     max_retries = int(os.environ.get("max_retries", "5"))
                     completion, retry_count = self.generate_with_entropy_control(inputs, generation_params, max_retries)
                 else:
-                    os.environ["prompt_only"] = "True"
+                    self.model.prompt_only = True
                     outputs = self.model.generate(
                         **inputs,
                         **generation_params,
@@ -611,9 +611,10 @@ class BaseEvaluator:
         os.environ["entropy_weight"] = str(args.entropy_weight)
         os.environ["adaptive_entropy"] = "True" if args.adaptive_entropy else "False"
         os.environ["adaptive_entropy_N"] = str(args.adaptive_entropy_N)
-        os.environ["adaptive_entropy_K"] = str(args.adaptive_entropy_K)
-        
-        if args.use_entropy_control:
+        os.environ["adaptive_entropy_K"] = str(args.adaptive_entropy_K)                                                                                     
+        os.environ["temperature"] = str(args.temperature) if args.do_sample else "1.0"
+
+        if args.use_entropy_control:                                    
             os.environ["use_entropy_control"] = "True"
             os.environ["entropy_threshold"] = str(args.entropy_threshold)
             os.environ["max_retries"] = str(args.max_retries)

@@ -63,6 +63,7 @@ def enable_tnot(model_class):
         self.entropy_threshold = None
         self.entropy_history = []
         self.index = None
+        self.prompt_only = False
     
     def enhanced_forward(
         self,
@@ -112,7 +113,7 @@ def enable_tnot(model_class):
         # Store original hidden states for entropy comparison
         original_hidden_states = hidden_states.clone()
 
-        prompt_only = os.environ.get("prompt_only", "False") == "True" 
+        prompt_only = self.prompt_only
         stage = "prompt" if prompt_only else "generation"
         
         # Apply TNOT logic
@@ -226,7 +227,8 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
                     
                     # Add entropy loss for the last position
                     last_logits = logits[:, -1, :]  # Shape: [batch_size, vocab_size]
-                    last_probs = F.softmax(last_logits, dim=-1)
+                    temperature = float(os.environ.get("temperature", "1.0"))
+                    last_probs = F.softmax(last_logits / temperature, dim=-1)
                     entropy = -torch.sum(last_probs * torch.log(last_probs + 1e-10), dim=-1)  # Shape: [batch_size]
                     entropy_loss = torch.mean(entropy)  # Average over batch
                     
@@ -277,7 +279,7 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
                 # at the end of prompt stage. It's only used during optimization.
                 # hidden_states = hidden_states + model.delta
         
-        os.environ["prompt_only"] = "False"
+        self.prompt_only = False
         torch.cuda.empty_cache()
         
     else:
@@ -311,7 +313,8 @@ def apply_entropy_control(model, logits, past_key_values, input_ids, logits_to_k
         
         # Calculate entropy for the last token position
         last_logits = logits[:, -1, :]  # Shape: [batch_size, vocab_size]
-        last_probs = F.softmax(last_logits, dim=-1)
+        temperature = float(os.environ.get("temperature", "1.0"))
+        last_probs = F.softmax(last_logits / temperature, dim=-1)
         entropy = -torch.sum(last_probs * torch.log(last_probs + 1e-10), dim=-1)  # Shape: [batch_size]
 
         # Dynamic entropy threshold
@@ -387,8 +390,9 @@ def _record_entropy_analysis(model, original_hidden_states, modified_hidden_stat
             modified_logits = model.lm_head(modified_hidden_states[:, slice_indices, :])
             
             # Calculate probabilities and entropy
-            original_probs = F.softmax(original_logits, dim=-1)
-            modified_probs = F.softmax(modified_logits, dim=-1)
+            temperature = float(os.environ.get("temperature", "1.0"))
+            original_probs = F.softmax(original_logits / temperature, dim=-1)
+            modified_probs = F.softmax(modified_logits / temperature, dim=-1)   
             
             # Calculate entropy: -sum(p * log(p))
             original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-10), dim=-1)
@@ -459,8 +463,9 @@ def _record_response_entropy(model, original_hidden_states, modified_hidden_stat
             modified_logits = model.lm_head(modified_hidden_states[:, slice_indices, :])
             
             # Calculate probabilities and entropy
-            original_probs = F.softmax(original_logits, dim=-1)
-            modified_probs = F.softmax(modified_logits, dim=-1)
+            temperature = float(os.environ.get("temperature", "1.0"))
+            original_probs = F.softmax(original_logits / temperature, dim=-1)
+            modified_probs = F.softmax(modified_logits / temperature, dim=-1)
             
             # Calculate entropy: -sum(p * log(p))
             original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-10), dim=-1)
@@ -596,7 +601,7 @@ def _enhanced_forward_for_instance(
     hidden_states = outputs[0]
     original_hidden_states = hidden_states.clone()
 
-    prompt_only = os.environ.get("prompt_only", "False") == "True" 
+    prompt_only = model.prompt_only
     stage = "prompt" if prompt_only else "generation"
     
     # Apply TNOT logic 
@@ -656,6 +661,7 @@ def _apply_tnot_to_instance(model):
     model.entropy_threshold = None
     model.entropy_history = []
     model.index = None
+    model.prompt_only = False
     
     # Replace the model's forward method with our enhanced version
     # Use functools.partial to create a pickleable bound method
@@ -723,8 +729,9 @@ def _record_response_entropy(model, original_hidden_states, modified_hidden_stat
         modified_logits = model.lm_head(modified_hidden_states)
         
         # Calculate entropies
-        original_probs = F.softmax(original_logits, dim=-1)
-        modified_probs = F.softmax(modified_logits, dim=-1)
+        temperature = float(os.environ.get("temperature", "1.0"))
+        original_probs = F.softmax(original_logits / temperature, dim=-1)
+        modified_probs = F.softmax(modified_logits / temperature, dim=-1)
         
         original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-8), dim=-1)
         modified_entropy = -torch.sum(modified_probs * torch.log(modified_probs + 1e-8), dim=-1)
