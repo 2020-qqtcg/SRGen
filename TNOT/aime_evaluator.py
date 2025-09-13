@@ -218,6 +218,8 @@ def main():
     evaluator.setup_environment(args)
     log_file = evaluator.setup_logging(args)
     
+    evaluator.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+
     if not args.parallel:
         evaluator.load_model(args.model_path, device=args.device)
     else:
@@ -228,12 +230,12 @@ def main():
         evaluator.tokenizer.encode(token, add_special_tokens=False)[0] 
         for token in ["system", "user", "assistant", ":", "\n"]
     ] if args.mask_special_tokens else None
+    
     # Set generation parameters
     generation_params = {
         "do_sample": args.do_sample,
         "temperature": args.temperature if args.do_sample else None,
-        "max_new_tokens": args.max_new_tokens,
-        "masked_token_ids": masked_token_ids
+        "max_new_tokens": args.max_new_tokens
     }
     
     # Run evaluation multiple times and take average if specified

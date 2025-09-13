@@ -189,8 +189,6 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
     Returns:
         Modified hidden states after TNOT processing
     """
-    prompt_only = os.environ.get("prompt_only", "False") == "True" 
-    stage = "prompt" if prompt_only else "generation"
     
     if prompt_only:
         if model.delta is not None:
@@ -601,7 +599,7 @@ def _enhanced_forward_for_instance(
     prompt_only = os.environ.get("prompt_only", "False") == "True" 
     stage = "prompt" if prompt_only else "generation"
     
-    # Apply TNOT logic
+    # Apply TNOT logic 
     hidden_states = apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_only)
     
     # Handle entropy analysis and recording

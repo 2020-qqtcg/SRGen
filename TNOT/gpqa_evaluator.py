@@ -109,6 +109,7 @@ D) {D}
     
     def get_system_prompt(self):
         """Get system prompt for GPQA"""
+        
         return """You are a helpful assistant. A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the user with the answer.\
 Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering."""
 

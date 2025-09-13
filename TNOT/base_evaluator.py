@@ -98,8 +98,7 @@ class BaseEvaluator:
             torch_dtype=torch.bfloat16,
             _attn_implementation="flash_attention_2",
             device_map=device,
-            trust_remote_code=True,
-            use_cache=True  # Enable KV caching for faster generation
+            trust_remote_code=True
         )
             
         # Check if this is a Phi model and log special handling
@@ -419,7 +418,7 @@ class BaseEvaluator:
                                max_parallel_gpus=None) -> Tuple[float, float]:
         """Parallel evaluation across multiple GPUs"""
         print("Starting parallel model evaluation...")
-        
+        random.seed(seed)
         # Detect available GPUs
         available_gpus = self.detect_available_gpus()
         
@@ -444,7 +443,7 @@ class BaseEvaluator:
         partitions = self.partition_data(eval_QAs, num_processes)
         
         # Set up temporary files for results
-        temp_dir = "temp_parallel_results"
+        temp_dir = os.environ.get("TEMP_PARALLEL_FILE", "temp_parallel_results")
         os.makedirs(temp_dir, exist_ok=True)
         temp_files = [os.path.join(temp_dir, f"gpu_{gpu_id}_results.json") for gpu_id in available_gpus]
         

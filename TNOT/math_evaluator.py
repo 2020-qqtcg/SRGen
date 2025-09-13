@@ -1,13 +1,14 @@
 import re
 import random
 import sympy
-from sympy import Basic, MatrixBase, Float, Number, E, Symbol, Mul, simplify
+from sympy import Basic, MatrixBase, Float, Number, Rational, E, Symbol, Mul, simplify
 from sympy.parsing.sympy_parser import parse_expr
 from datasets import load_dataset
 from TNOT.base_evaluator import BaseEvaluator
+from functools import lru_cache
 from itertools import product
-import logging
 from transformers import AutoTokenizer
+import logging
 
 class MATH500Evaluator(BaseEvaluator):
     def __init__(self):
