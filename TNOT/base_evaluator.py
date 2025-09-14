@@ -178,6 +178,9 @@ class BaseEvaluator:
                 print(f"High entropy detected at retry {retry_count}, position {self.model.high_entropy_position}")
                 print(f"Partial completion: {completion_part}")
                 
+                # Add the partial completion to full_completion
+                full_completion += completion_part
+                
                 old_inputs = current_inputs
                 new_text = self.tokenizer.decode(current_inputs['input_ids'][0], skip_special_tokens=True) + completion_part
                 current_inputs = self.tokenizer(new_text, return_tensors="pt", add_special_tokens=False).to(self.model.device)
@@ -227,6 +230,7 @@ class BaseEvaluator:
         
         with open(log_file, "a") as f:
             f.write(f"Number of evaluation samples: {len(eval_QAs)}\n\n")
+            f.write(f"Start time: {time.time()}\n")
         
         correct = 0
         format_correct = 0
@@ -297,8 +301,9 @@ class BaseEvaluator:
         print(f"Format Accuracy: {format_accuracy:.4f}")
         print(f"Total Retries: {total_retries}")
         print(f"Average Retries per Sample: {avg_retries:.2f}")
-        
+
         with open(log_file, "a") as f:
+            f.write(f"End time: {time.time()}\n")
             f.write(f"Evaluation Results (Samples: {total}):\n")
             f.write(f"Answer Accuracy: {accuracy:.4f}\n")
             f.write(f"Format Accuracy: {format_accuracy:.4f}\n")

@@ -189,7 +189,7 @@ if __name__ == "__main__":
             },
             {
                 'name': 'AIME24',
-                'values': [16.7, 20.0, 0, 30.0]  # Base, SLOT, TTSR, SLOT+TTSR
+                'values': [13.3, 20.0, 16.7, 30.0]  # Base, SLOT, TTSR, SLOT+TTSR
             }
         ],
         'method_names': ['Base', 'SLOT', 'TTSR', 'S+T'],
