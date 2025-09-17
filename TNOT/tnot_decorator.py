@@ -194,11 +194,13 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
     if prompt_only:
         if model.delta is not None:
             # Apply existing delta but don't modify hidden_states yet
+            # hidden_states = hidden_states + model.delta
             pass
             
         times = int(os.environ.get("times", 1))
         lr = float(os.environ.get("lr", 0.1))
         
+        loss_list = []
         with torch.enable_grad():
             
             if model.delta is not None:
@@ -235,6 +237,15 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
                     # Combine losses using weighted average
                     entropy_weight = float(os.environ.get("entropy_weight", "0.1"))
                     loss = (1 - entropy_weight) * ce_loss + entropy_weight * entropy_loss
+
+                    # loss_list.append(
+                    #     {
+                    #         "ce_loss": ce_loss.item(),
+                    #         "entropy_loss": entropy_loss.item(),
+                    #         "loss": loss.item()
+                    #     }
+                    # )
+                    # print(f"Append: {loss_list[-1]}")
                     
                     loss.backward()
                     optimizer_high.step()
@@ -281,6 +292,11 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
         
         model.prompt_only = False
         torch.cuda.empty_cache()
+
+        # if os.environ.get("LOSS", "False") == "True" and loss_list:
+        #     with open(r"./loss.json", "w", encoding='utf-8') as f:
+        #         json.dump(loss_list, f, indent=4)
+        #     os.environ["LOSS"] = "False"
         
     else:
         if model.delta is not None:
@@ -327,12 +343,17 @@ def apply_entropy_control(model, logits, past_key_values, input_ids, logits_to_k
             if current_len > adaptive_entropy_N:
                 window = torch.tensor(model.entropy_history[-adaptive_entropy_N:], device=entropy.device)
 
+                
+                minimal_std = float(os.environ.get("minimal_std", "0.5"))
+                minimal_threshold = float(os.environ.get("minimal_threshold", "1.8"))
+
                 mean_history = torch.mean(window)
-                std_history = max(torch.std(window), 0.5)
+                std_history = max(torch.std(window), minimal_std)
 
                 entropy_threshold = mean_history + adaptive_entropy_K * std_history
                 entropy_threshold = entropy_threshold.item()
-                entropy_threshold = max(entropy_threshold, 1.8)  # Ensure non-negative threshold
+                entropy_threshold = max(entropy_threshold, minimal_threshold)  # Ensure non-negative threshold
+                
 
             model.entropy_history.append(entropy.item())
         

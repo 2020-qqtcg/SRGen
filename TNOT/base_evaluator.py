@@ -594,6 +594,10 @@ class BaseEvaluator:
         parser.add_argument("--adaptive_entropy_K", type=float, default=2, help="K for adaptive entropy threshold")
         parser.add_argument("--mask_special_tokens", action="store_true", help="Mask special tokens in the input")
         
+        parser.add_argument("--set_minimal_threshold", action="store_true", help="Set minimal threshold for entropy control")
+        parser.add_argument("--minimal_std", type=float, default=0.5, help="std for minimal threshold")
+        parser.add_argument("--minimal_threshold", type=float, default=1.8, help="Threshold for minimal threshold")
+        
         # Parallel evaluation arguments
         parser.add_argument("--parallel", action="store_true", help="Enable parallel evaluation across multiple GPUs")
         parser.add_argument("--max_parallel_gpus", type=int, default=None, help="Maximum number of GPUs to use for parallel evaluation")
@@ -623,6 +627,10 @@ class BaseEvaluator:
             os.environ["use_entropy_control"] = "True"
             os.environ["entropy_threshold"] = str(args.entropy_threshold)
             os.environ["max_retries"] = str(args.max_retries)
+
+            os.environ["minimal_std"] = str(args.minimal_std)
+            os.environ["minimal_threshold"] = str(args.minimal_threshold)
+
             print(f"Entropy control enabled with threshold: {args.entropy_threshold}, max retries: {args.max_retries}")
         else:
             os.environ["use_entropy_control"] = "False"

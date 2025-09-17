@@ -96,6 +96,10 @@ def plot_grouped_bar_chart(config):
         
         # 设置刻度参数
         ax.tick_params(axis='both', labelsize=10)
+        
+        # 加粗整个图表的外围边框
+        for spine in ax.spines.values():
+            spine.set_linewidth(2)
     
     # 创建图例
     from matplotlib.patches import Patch
@@ -131,7 +135,7 @@ def plot_bar_chart(config):
     plt.figure(figsize=figsize)
     
     # 创建柱状图
-    bars = plt.bar(column_names, values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+    bars = plt.bar(column_names, values, color=colors, alpha=0.8, edgecolor='none')
     
     # 设置标题和标签
     plt.title(title, fontsize=16, fontweight='bold', pad=20)
@@ -148,6 +152,11 @@ def plot_bar_chart(config):
     plt.grid(axis='y', alpha=0.3, linestyle='--')
     plt.xticks(fontsize=11)
     plt.yticks(fontsize=11)
+    
+    # 加粗整个图表的外围边框
+    ax = plt.gca()
+    for spine in ax.spines.values():
+        spine.set_linewidth(2)
     
     # 调整布局
     plt.tight_layout()
@@ -180,22 +189,22 @@ if __name__ == "__main__":
     grouped_config = {
         'datasets': [
             {
-                'name': 'GPQA',
-                'values': [36.4, 32.3, 0, 37.4]  # Base, SLOT, TTSR, SLOT+TTSR
+                'name': 'AMC',
+                'values': [35.0, 35.0, 37.0, 38.0]  # Base, SLOT, TTSR, SLOT+TTSR
             },
             {
                 'name': 'MATH500',
-                'values': [63.8, 64.2, 68.8, 70.6]  # Base, SLOT, TTSR, SLOT+TTSR
+                'values': [63.8, 64.2, 69.4, 70.6]  # Base, SLOT, TTSR, SLOT+TTSR
             },
             {
                 'name': 'AIME24',
-                'values': [13.3, 20.0, 16.7, 30.0]  # Base, SLOT, TTSR, SLOT+TTSR
+                'values': [13.3, 20.0, 20.0, 30.0]  # Base, SLOT, TTSR, SLOT+TTSR
             }
         ],
         'method_names': ['Base', 'SLOT', 'TTSR', 'S+T'],
         'ylabel': 'Accuracy (%)',
         'colors': ['#AB6F26', '#1B5588', '#1A5B54', '#680D30'],  # Base, SLOT, TTSR, SLOT+TTSR  
-        'figsize': (10, 4),
+        'figsize': (10, 3.5),
         'flexible_scale': True  # 使用灵活刻度来最大化显示差异
     }
     
