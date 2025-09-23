@@ -394,19 +394,19 @@ def plot_loss_comparison(json_files, labels, save_path=None, title="Loss Compari
 if __name__ == "__main__":
     # Learning rate comparison (4 files)
     json_files = [
-        "source/loss_0.0001.json",
-        "source/loss_0.001.json", 
-        "source/loss_0.01.json",
-        "source/loss_0.1.json"
+        "source/distill_qwen/loss_0.0001.json",
+        "source/distill_qwen/loss_0.001.json", 
+        "source/distill_qwen/loss_0.01.json",
+        "source/distill_qwen/loss_0.1.json"
     ]
     
     try:
         # Plot learning rate comparison (line charts)
-        plot_lr_comparison(json_files, save_path="lr_comparison.png", 
+        plot_lr_comparison(json_files, save_path="lr_comparison_qwen.png", 
                           title="", limit_steps=1000)
         
         # Plot learning rate comparison (scatter plots)
-        plot_lr_comparison(json_files, save_path="lr_scatter_comparison.png", 
+        plot_lr_comparison(json_files, save_path="lr_scatter_comparison_qwen.png", 
                           title="", limit_steps=1000, 
                           scatter_mode=True)
         

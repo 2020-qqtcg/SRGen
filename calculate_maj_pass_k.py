@@ -155,17 +155,7 @@ def print_statistics(results: Dict[int, List[bool]], num_samples: int, num_runs:
     print(f"{'k':<5} {'maj@k':<10} {'pass@k':<10}")
     print("-" * 25)
     
-    # 智能显示k值范围：如果max_k很大，选择性显示重要的k值
-    if max_k <= 20:
-        # 小于等于20时，显示所有k值
-        k_values = list(range(1, max_k + 1))
-    else:
-        # 大于20时，显示前10个，然后每5个显示一个，最后显示max_k
-        k_values = list(range(1, 11))  # 1-10
-        for k in range(15, max_k, 5):  # 15, 20, 25, ...
-            k_values.append(k)
-        if max_k not in k_values:
-            k_values.append(max_k)
+    k_values = list(range(1, max_k + 1))
     
     for k in k_values:
         maj_k = calculate_maj_at_k(results, k)

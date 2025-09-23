@@ -177,7 +177,7 @@ def enable_tnot(model_class):
     return model_class
 
 
-def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_only):
+def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_only, logits_to_keep = None):
     """
     Apply TNOT (Test-time Training) logic to hidden states
     
@@ -253,6 +253,9 @@ def apply_tnot_logic(model, hidden_states, input_ids, masked_token_ids, prompt_o
                 # Apply delta_high for current prompt processing
                 # Note: This modifies hidden_states only during prompt stage when delta already exists
                 hidden_states = hidden_states + delta_high
+
+                if response_entropy_file := os.environ.get("response_entropy_file_after", ""):
+                    _record_high_entropy_token(model, model.lm_head(hidden_states), logits_to_keep, response_entropy_file)
             
             # Optimize delta_normal with only cross-entropy loss
             else:
@@ -315,8 +318,8 @@ def handle_entropy_analysis(model, original_hidden_states, modified_hidden_state
     if os.environ.get("record_entropy", "False") == "True" and model.delta is not None:
         _record_entropy_analysis(model, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep)
 
-    if response_entropy_file := os.environ.get("response_entropy_file", ""):
-        _record_response_entropy(model, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file)
+    # if response_entropy_file := os.environ.get("response_entropy_file", ""):
+    #     _record_response_entropy(model, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file)
 
 
 def apply_entropy_control(model, logits, past_key_values, input_ids, logits_to_keep=0, stage="generation"):
@@ -361,6 +364,10 @@ def apply_entropy_control(model, logits, past_key_values, input_ids, logits_to_k
         high_entropy_mask = entropy > entropy_threshold
         
         if high_entropy_mask.any():
+
+            if response_entropy_file := os.environ.get("response_entropy_file", ""):
+                _record_high_entropy_token(model, logits, logits_to_keep, response_entropy_file)
+                
             # Mark that high entropy was detected
             model.high_entropy_detected = True
             # Get the current sequence length for position tracking
@@ -477,16 +484,19 @@ def _record_response_entropy(model, original_hidden_states, modified_hidden_stat
     """Record entropy analysis for response tokens only"""
     try:
         # Calculate logits for both original and modified hidden states
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        if isinstance(logits_to_keep, int) and logits_to_keep > 0:
+            slice_indices = slice(-logits_to_keep, None)
+        else:
+            slice_indices = slice(None)  # All tokens
         
         with torch.no_grad():
+            # Get lm_head from model to compute logits
             original_logits = model.lm_head(original_hidden_states[:, slice_indices, :])
             modified_logits = model.lm_head(modified_hidden_states[:, slice_indices, :])
             
             # Calculate probabilities and entropy
-            temperature = float(os.environ.get("temperature", "1.0"))
-            original_probs = F.softmax(original_logits / temperature, dim=-1)
-            modified_probs = F.softmax(modified_logits / temperature, dim=-1)
+            original_probs = F.softmax(original_logits, dim=-1)
+            modified_probs = F.softmax(modified_logits, dim=-1)
             
             # Calculate entropy: -sum(p * log(p))
             original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-10), dim=-1)
@@ -496,22 +506,44 @@ def _record_response_entropy(model, original_hidden_states, modified_hidden_stat
             original_tokens = torch.argmax(original_logits, dim=-1)
             modified_tokens = torch.argmax(modified_logits, dim=-1)
             
-            # Process each batch and sequence position
-            batch_size, seq_len = original_tokens.shape
+            # Debug: Print tensor shapes
+            
+            # Handle different tensor shapes
+            if len(original_tokens.shape) == 1:
+                # If 1D tensor, treat as single batch
+                batch_size = 1
+                seq_len = original_tokens.shape[0]
+                original_tokens = original_tokens.unsqueeze(0)
+                modified_tokens = modified_tokens.unsqueeze(0)
+                original_entropy = original_entropy.unsqueeze(0)
+                modified_entropy = modified_entropy.unsqueeze(0)
+            elif len(original_tokens.shape) == 2:
+                batch_size, seq_len = original_tokens.shape
+            else:
+                # Handle higher dimensions by flattening
+                original_shape = original_tokens.shape
+                original_tokens = original_tokens.view(-1, original_shape[-1])
+                modified_tokens = modified_tokens.view(-1, original_shape[-1])
+                original_entropy = original_entropy.view(-1, original_shape[-1])
+                modified_entropy = modified_entropy.view(-1, original_shape[-1])
+                batch_size, seq_len = original_tokens.shape
             
             # Prepare response data list
             response_data = []
             
             for batch_idx in range(batch_size):
                 for seq_idx in range(seq_len):
-                    # Create record for each response token (index starts from 0)
-                    model.index = 0 if model.index is None else model.index + 1
+                    # Create record for each response token
                     record = {
-                        "token_index": model.index,  # Response token index starting from 0
+                        "batch_idx": batch_idx,
+                        "seq_idx": seq_idx,
                         "original_entropy": original_entropy[batch_idx, seq_idx].item(),
                         "modified_entropy": modified_entropy[batch_idx, seq_idx].item(),
-                        "original_token_decoded": model._safe_decode_token(original_tokens[batch_idx, seq_idx].item()),
-                        "modified_token_decoded": model._safe_decode_token(modified_tokens[batch_idx, seq_idx].item()),
+                        "entropy_diff": (modified_entropy[batch_idx, seq_idx] - original_entropy[batch_idx, seq_idx]).item(),
+                        "original_token": original_tokens[batch_idx, seq_idx].item(),
+                        "modified_token": modified_tokens[batch_idx, seq_idx].item(),
+                        "original_token_decoded": _safe_decode_token(original_tokens[batch_idx, seq_idx].item()),
+                        "modified_token_decoded": _safe_decode_token(modified_tokens[batch_idx, seq_idx].item()),
                     }
                     response_data.append(record)
             
@@ -533,8 +565,83 @@ def _record_response_entropy(model, original_hidden_states, modified_hidden_stat
                     
     except Exception as e:
         # Log error but don't interrupt the forward pass
-        print(f"Error in response entropy recording: {e}")
+        import traceback
+        print(f"Error in response entropy analysis: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
 
+def _record_high_entropy_token(model, original_logits, logits_to_keep, response_entropy_file):
+    """Record entropy analysis for response tokens only"""
+    try:
+        # Calculate logits for both original and modified hidden states
+        if isinstance(logits_to_keep, int) and logits_to_keep > 0:
+            slice_indices = slice(-logits_to_keep, None)
+        else:
+            slice_indices = slice(None)  # All tokens
+        
+        with torch.no_grad():
+            # Get lm_head from model to compute logits
+            
+            # Calculate probabilities and entropy
+            original_probs = F.softmax(original_logits, dim=-1)
+            
+            # Calculate entropy: -sum(p * log(p))
+            original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-10), dim=-1)
+            
+            # Get predicted tokens
+            original_tokens = torch.argmax(original_logits, dim=-1)
+            
+            # Handle different tensor shapes
+            if len(original_tokens.shape) == 1:
+                # If 1D tensor, treat as single batch
+                batch_size = 1
+                seq_len = original_tokens.shape[0]
+                original_tokens = original_tokens.unsqueeze(0)
+                original_entropy = original_entropy.unsqueeze(0)
+            elif len(original_tokens.shape) == 2:
+                batch_size, seq_len = original_tokens.shape
+            else:
+                # Handle higher dimensions by flattening
+                original_shape = original_tokens.shape
+                original_tokens = original_tokens.view(-1, original_shape[-1])
+                original_entropy = original_entropy.view(-1, original_shape[-1])
+                batch_size, seq_len = original_tokens.shape
+            
+            # Prepare response data list
+            response_data = []
+            
+            for batch_idx in range(batch_size):
+                for seq_idx in range(seq_len):
+                    # Create record for each response token
+                    record = {
+                        "batch_idx": batch_idx,
+                        "seq_idx": seq_idx,
+                        "original_entropy": original_entropy[batch_idx, seq_idx].item(),
+                        "original_token": original_tokens[batch_idx, seq_idx].item(),
+                        "original_token_decoded": _safe_decode_token(original_tokens[batch_idx, seq_idx].item()),
+                    }
+                    response_data.append(record)
+            
+            # Read existing data if file exists
+            existing_data = []
+            if os.path.exists(response_entropy_file):
+                try:
+                    with open(response_entropy_file, "r", encoding="utf-8") as f:
+                        existing_data = json.load(f)
+                except (json.JSONDecodeError, FileNotFoundError):
+                    existing_data = []
+            
+            # Extend existing data with new response data
+            existing_data.extend(response_data)
+            
+            # Write updated data back to file
+            with open(response_entropy_file, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+                    
+    except Exception as e:
+        # Log error but don't interrupt the forward pass
+        import traceback
+        print(f"Error in response entropy analysis: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
 
 def _create_tnot_auto_model_class(auto_model_class):
     """
@@ -733,73 +840,6 @@ def _safe_decode_sequence(token_ids):
         return decoded
     except Exception as e:
         return f"<decode_error: {e}>"
-
-
-def _record_response_entropy(model, original_hidden_states, modified_hidden_states, input_ids, logits_to_keep, response_entropy_file):
-    """Record response entropy data - implementation matches original"""
-    try:
-        # Get tokenizer path
-        tokenizer_path = os.environ.get("tokenizer_path")
-        if not tokenizer_path:
-            return
-        
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-        
-        # Calculate entropy for both original and modified states
-        original_logits = model.lm_head(original_hidden_states)
-        modified_logits = model.lm_head(modified_hidden_states)
-        
-        # Calculate entropies
-        temperature = float(os.environ.get("temperature", "1.0"))
-        original_probs = F.softmax(original_logits / temperature, dim=-1)
-        modified_probs = F.softmax(modified_logits / temperature, dim=-1)
-        
-        original_entropy = -torch.sum(original_probs * torch.log(original_probs + 1e-8), dim=-1)
-        modified_entropy = -torch.sum(modified_probs * torch.log(modified_probs + 1e-8), dim=-1)
-        
-        # Prepare response data
-        response_data = []
-        
-        batch_size, seq_len = input_ids.shape
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        
-        for batch_idx in range(batch_size):
-            for pos in range(seq_len):
-                if slice_indices == slice(None) or pos >= seq_len + slice_indices.start:
-                    token_id = input_ids[batch_idx, pos].item()
-                    
-                    response_entry = {
-                        "index": getattr(model, 'index', 0),
-                        "batch_idx": batch_idx,
-                        "position": pos,
-                        "token_id": token_id,
-                        "token_text": _safe_decode_token(token_id),
-                        "original_entropy": original_entropy[batch_idx, pos].item(),
-                        "modified_entropy": modified_entropy[batch_idx, pos].item(),
-                        "entropy_diff": (modified_entropy[batch_idx, pos] - original_entropy[batch_idx, pos]).item(),
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    response_data.append(response_entry)
-        
-        # Load existing data and append new data
-        existing_data = []
-        if os.path.exists(response_entropy_file):
-            try:
-                with open(response_entropy_file, "r", encoding="utf-8") as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                existing_data = []
-        
-        # Extend existing data with new response data
-        existing_data.extend(response_data)
-        
-        # Write updated data back to file
-        with open(response_entropy_file, "w", encoding="utf-8") as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
-                
-    except Exception as e:
-        # Log error but don't interrupt the forward pass
-        print(f"Error in response entropy recording: {e}")
 
 
 def _reset_entropy_detection_method(self):
