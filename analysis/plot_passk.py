@@ -1,5 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+# ---------- Paper style ----------
+mpl.rcParams.update({
+    "font.family": "Times New Roman",
+    "font.size": 12,
+    "axes.labelsize": 18,
+    "axes.titlesize": 16,
+    "axes.titleweight": "bold",
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "lines.linewidth": 1.0,
+})
 
 # ----- 数据 -----
 k = np.arange(1, 49)
@@ -42,54 +55,67 @@ pass_srgen = np.array([
     0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63
 ]) * 100
 
-# 仅保留奇数 k（1,3,...,31）
+# 仅保留奇数 k（1,3,...,47）
 idx = np.arange(0, 47, 2)
 k_odd = k[idx]
 maj_b, maj_s = maj_base[idx], maj_srgen[idx]
 pas_b, pas_s = pass_base[idx], pass_srgen[idx]
 
-# ----- 画图风格（与示例图一致：网格点线、实线、蓝/橙）-----
-plt.rcParams.update({
-    "font.size": 11,
-    "axes.titlesize": 12,
-    "axes.labelsize": 12,
-    "legend.fontsize": 10,
-    "figure.dpi": 160,
-    "axes.grid": True,
-    "grid.linestyle": ":",
-    "grid.alpha": 0.6,
-    "grid.linewidth": 0.8
-})
+# ---------- colors ----------
+deep_blue = "#1f4e79"   # Base
+warm_brown = "#c77034"  # SRGen
 
-fig, axes = plt.subplots(1, 2, figsize=(8.2, 2.8), constrained_layout=True)
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5), constrained_layout=True)
 
 for ax in axes:
     ax.set_xlim(1, 47)
-    ax.set_xticks(np.arange(1, 48, 4))  # 横坐标刻度间隔为 4
-    ax.set_xlabel("k")
-    ax.grid(True, which="both")
-    ax.tick_params(direction="out")
+    ax.set_xticks(np.arange(1, 48, 4))
+    ax.set_xlabel("k", fontweight="bold")
+
+    # grid (soft, dotted)
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.9, alpha=0.35)
+    ax.grid(True, axis="x", linestyle="--", linewidth=0.6, alpha=0.20)
+
+    # thick black frame
+    for side in ["top", "right", "bottom", "left"]:
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_linewidth(2.0)
+        ax.spines[side].set_color("black")
+    ax.tick_params(direction="out", width=2.0, length=5)
 
 # 左：Cons@k（maj@k）
-axes[0].plot(k_odd, maj_b, marker="o", linestyle="-", linewidth=1.5, color="#1f77b4", markersize=3, label="Base")
-axes[0].plot(k_odd, maj_s, marker="s", linestyle="-", linewidth=1.5, color="#ff7f0e", markersize=3, label="SRGen")
-axes[0].set_title("Cons@k")
-axes[0].set_ylabel("Accuracy(%)")
-axes[0].legend(frameon=True)
+axes[0].plot(k_odd, maj_b, color=deep_blue,  linestyle="-", linewidth=2.4,
+             label="Base",  zorder=3)
+axes[0].plot(k_odd, maj_s, color=warm_brown, linestyle="-", linewidth=2.4,
+             label="SRGen", zorder=3)
+axes[0].set_title("Cons@k", pad=6)
+axes[0].set_ylabel("Accuracy (%)", fontweight="bold")
+axes[0].legend(
+    frameon=True, fancybox=True, framealpha=1.0,
+    facecolor="white", edgecolor="black", loc="upper right"
+)
 
 # 右：Pass@k（pass@k）
-axes[1].plot(k_odd, pas_b, marker="o", linestyle="-", linewidth=1.5, color="#1f77b4", markersize=3, label="Base")
-axes[1].plot(k_odd, pas_s, marker="s", linestyle="-", linewidth=1.5, color="#ff7f0e", markersize=3, label="SRGen")
-axes[1].set_title("Pass@k")
-axes[1].set_ylabel("Accuracy(%)")
-axes[1].legend(frameon=True, loc='lower right')
+axes[1].plot(k_odd, pas_b, color=deep_blue,  linestyle="-", linewidth=2.4,
+             label="Base",  zorder=3)
+axes[1].plot(k_odd, pas_s, color=warm_brown, linestyle="-", linewidth=2.4,
+             label="SRGen", zorder=3)
+axes[1].set_title("Pass@k", pad=6)
+axes[1].set_ylabel("Accuracy (%)", fontweight="bold")
+axes[1].legend(
+    frameon=True, fancybox=True, framealpha=1.0,
+    facecolor="white", edgecolor="black", loc="lower right"
+)
 
 # 共享 y 轴范围（留少量边距）
 ymin = min(maj_b.min(), maj_s.min(), pas_b.min(), pas_s.min())
 ymax = max(maj_b.max(), maj_s.max(), pas_b.max(), pas_s.max())
 for ax in axes:
-    ax.set_ylim(ymin - 2, ymax + 2)
+    margin = 1.0
+    ax.set_ylim(ymin - margin, ymax + margin)
 
-# 保存 PNG（论文用高分辨率）
-plt.savefig("cons_pass_k_iclr.png", dpi=400, bbox_inches="tight")
+# 主标题（可选）
+fig.suptitle("", fontsize=20, fontweight="bold")
+
+plt.savefig("image/cons_pass_k_iclr.png", dpi=400, bbox_inches="tight")
 plt.show()
