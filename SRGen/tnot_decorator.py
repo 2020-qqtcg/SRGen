@@ -1,5 +1,5 @@
 """
-TNOT (Test-time Training) Universal Decorator
+Test-time Training Universal Decorator
 
 This module provides a universal decorator that can add TNOT functionality to any 
 Transformers CausalLM model without requiring separate modeling files for each model type.

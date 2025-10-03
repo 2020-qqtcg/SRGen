@@ -2,7 +2,7 @@ import re
 import random
 from typing import Optional, List, Tuple
 from datasets import load_dataset
-from TNOT.base_evaluator import BaseEvaluator
+from SRGen.base_evaluator import BaseEvaluator
 from transformers import AutoTokenizer
 
 class AIMEEvaluator(BaseEvaluator):

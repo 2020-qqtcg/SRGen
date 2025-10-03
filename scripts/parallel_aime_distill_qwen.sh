@@ -6,7 +6,7 @@ export model_path=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 
 export TEMP_PARALLEL_FILE="tp_aime_compare"
 
-python -m TNOT.aime_evaluator \
+python -m SRGen.aime_evaluator \
     --model_path $model_path \
     --parallel \
     --max_parallel_gpus 4 \

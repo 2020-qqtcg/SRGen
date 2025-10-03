@@ -8,7 +8,7 @@ import json
 import time
 from typing import List, Dict, Any, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
-from TNOT.tnot_decorator import enable_tnot
+from SRGen.tnot_decorator import enable_tnot
 
 class BaseEvaluator:
     def __init__(self):

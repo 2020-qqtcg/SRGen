@@ -4,7 +4,7 @@ import sympy
 from sympy import Basic, MatrixBase, Float, Number, Rational, E, Symbol, Mul, simplify
 from sympy.parsing.sympy_parser import parse_expr
 from datasets import load_dataset
-from TNOT.base_evaluator import BaseEvaluator
+from SRGen.base_evaluator import BaseEvaluator
 from functools import lru_cache
 from itertools import product
 from transformers import AutoTokenizer
