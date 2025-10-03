@@ -154,9 +154,6 @@ comparison_*/
 entropy_averages.json
 analyze_entropy.py
 temp*
-calculate_maj_pass_k.py
-extract_wrong_samples.py
-float_diff.py
 
 logs*
 
